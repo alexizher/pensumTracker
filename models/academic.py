@@ -29,6 +29,7 @@ class AcademicRecord(BaseModel):
     program_code: str
     pensum_version: int
     version_actual: int
+    enrolled_version: int | None = None  # versión asignada al estudiante
     versiones: list[int]
     total_credits: int
     completed_credits: int       # todos los créditos aprobados (puede superar total_credits)

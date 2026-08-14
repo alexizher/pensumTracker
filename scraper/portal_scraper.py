@@ -66,6 +66,7 @@ class _LegacyTLSAdapter(HTTPAdapter):
 class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     _HISTORIA_URL = "https://tsone.udea.edu.co/php_historia_estudiante/"
     _INFO_URL = "https://tsone.udea.edu.co/php_constancia_estudiante/"
+    _PENSUM_URL = "https://ayudame2.udea.edu.co/php_pensum_estudiante/"
     _CURSUM_URL = "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria/pensum"
 
     def __init__(self, cookies: dict[str, str], pensum_version: int = 0):
@@ -84,11 +85,13 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
                     "PHPSESSID", value, domain="ayudame2.udea.edu.co", path="/")
         self._pensum_version = pensum_version
         self._udeasecure = cookies.get("udeasecure", "")
+        self._password: str | None = None
         self._student_cache: tuple[str, str, str] | None = None
         self._info_cache: BeautifulSoup | None = None
         # Versión del pensum en la que el estudiante está matriculado (del selector
         # de programas, atributo data-version). None si no se pudo determinar.
         self._enrolled_version: int | None = None
+        self._bank_requirements_cache: tuple[int | None, dict[str, int]] | None = None
 
     def _do_reauth(self, host: str, password: str) -> str | None:
         relogin_base = f"https://{host}/php_relogin/"
@@ -159,6 +162,11 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             return False
         log.info("login: reauth tsone ok | udeasecure presente=True")
 
+        # El pensum oficial (mínimos por banco) vive en ayudame2.
+        log.info("login: reauth ayudame2")
+        self._do_reauth("ayudame2.udea.edu.co", password)
+        self._password = password
+
         resp = self._tsone_get(self._INFO_URL + "?app=consultar")
         self._info_cache = BeautifulSoup(resp.text, "lxml")
         log.info("login: constancia GET status=%d final_url=%s",
@@ -171,8 +179,10 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     def logout(self) -> None:
         self._session.cookies.clear()
         self._udeasecure = ""
+        self._password = None
         self._student_cache = None
         self._info_cache = None
+        self._bank_requirements_cache = None
 
     def _tsone_get(self, url: str) -> requests.Response:
         if self._udeasecure:
@@ -241,6 +251,27 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         if self._enrolled_version is None:
             self._fetch_historia_soup(program_code)
         return self._enrolled_version
+
+    def fetch_assigned_pensum_version(self, program_code: str) -> int | None:
+        """Versión de pensum asignada al estudiante.
+
+        Prioridad:
+        1. data-version del selector de programas (historia)
+        2. versión del pensum oficial en ayudame2: Programa ... (vN)
+        """
+        enrolled = self.fetch_enrolled_version(program_code)
+        if enrolled:
+            log.info("fetch_assigned_pensum_version: desde historia=%d", enrolled)
+            return enrolled
+
+        page_version, _ = self.fetch_elective_bank_requirements()
+        if page_version:
+            log.info("fetch_assigned_pensum_version: desde pensum oficial=%d", page_version)
+            self._enrolled_version = page_version
+            return page_version
+
+        log.warning("fetch_assigned_pensum_version: no se pudo determinar")
+        return None
 
     def _fetch_info_soup(self) -> BeautifulSoup:
         if self._info_cache is None:
@@ -365,6 +396,97 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
                 total_credits = p.get("creditosGrado", 0)
                 return version_actual, versiones, total_credits
         return 0, [], 0
+
+    def fetch_elective_bank_requirements(self) -> tuple[int | None, dict[str, int]]:
+        """Lee del pensum oficial (ayudame2) los mínimos por banco y la versión
+        del plan del estudiante. Cursum no expone esos cupos; solo el catálogo.
+
+        Returns:
+            (pensum_version_en_página | None, {nombre_banco: créditos_mínimos})
+        """
+        if self._bank_requirements_cache is not None:
+            return self._bank_requirements_cache
+
+        resp = self._session.get(
+            self._PENSUM_URL + "?app=consultar",
+            allow_redirects=True,
+            timeout=_TIMEOUT,
+        )
+        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and self._password:
+            log.info("fetch_elective_bank_requirements: reauth ayudame2")
+            self._do_reauth("ayudame2.udea.edu.co", self._password)
+            resp = self._session.get(
+                self._PENSUM_URL + "?app=consultar",
+                allow_redirects=True,
+                timeout=_TIMEOUT,
+            )
+
+        if "php_relogin" in resp.url or "PÉNSUM DEL PROGRAMA" not in resp.text:
+            log.warning(
+                "fetch_elective_bank_requirements: no se pudo leer el pensum | url=%s",
+                resp.url,
+            )
+            self._bank_requirements_cache = (None, {})
+            return self._bank_requirements_cache
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        text = soup.get_text("\n", strip=True)
+
+        version: int | None = None
+        version_m = re.search(
+            r"Programa\s*:\s*\[[^\]]+\].*?\(v\s*(\d+)\)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if version_m:
+            version = int(version_m.group(1))
+
+        requirements: dict[str, int] = {}
+        # Bloques: "NOMBRE BANCO (N materias)" + "Debes cursar al menos X créditos"
+        for m in re.finditer(
+            r"([A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9 ,./()+-]*?)\s*\(\d+\s+materias\)\s*"
+            r"Debes cursar al menos\s+(\d+)\s+cr[eé]ditos",
+            text,
+            re.IGNORECASE,
+        ):
+            name = " ".join(m.group(1).split())
+            requirements[name] = int(m.group(2))
+
+        log.info(
+            "fetch_elective_bank_requirements: version=%s bancos=%s total_electivas=%d",
+            version, requirements, sum(requirements.values()),
+        )
+        self._bank_requirements_cache = (version, requirements)
+        return self._bank_requirements_cache
+
+    def resolve_total_credits(
+        self,
+        catalog_total: int,
+        subjects: list[Subject],
+    ) -> tuple[int, dict[str, int]]:
+        """Total de grado acorde a la versión del pensum efectiva.
+
+        Si el pensum oficial (misma versión) trae mínimos por banco:
+            total = obligatorias + suma(mínimos por banco)
+        Si no, cae a creditosGrado del catálogo Cursum.
+        """
+        page_version, bank_reqs = self.fetch_elective_bank_requirements()
+        oblig = sum(s.credits for s in subjects if s.obligatoria)
+
+        if bank_reqs and page_version == self._pensum_version:
+            total = oblig + sum(bank_reqs.values())
+            log.info(
+                "resolve_total_credits: versión=%d oblig=%d electivas_min=%d -> %d "
+                "(catálogo cursum=%d)",
+                self._pensum_version, oblig, sum(bank_reqs.values()), total, catalog_total,
+            )
+            return total, bank_reqs
+
+        log.info(
+            "resolve_total_credits: fallback cursum=%d | page_version=%s efectiva=%d bancos=%d",
+            catalog_total, page_version, self._pensum_version, len(bank_reqs),
+        )
+        return catalog_total, {}
 
     def fetch_curriculum(self) -> list[Subject]:
         _, _, program_code = self.fetch_student_info()
