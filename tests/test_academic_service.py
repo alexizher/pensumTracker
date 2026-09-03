@@ -109,3 +109,56 @@ def test_en_curso_cuenta_para_satisfacer_electivas():
     st = _statuses(rec)
     assert st["E1"] == "in_progress"
     assert st["E2"] == "not_needed"         # ya hay 2 cr de electivas en curso
+
+
+def test_total_y_bancos_desde_requisitos_oficiales():
+    """Cupos por banco del pensum oficial definen total y créditos_required."""
+    subs = [
+        _subject("O1", 100, True, cursada=True),
+        _subject("O2", 45, True, cursada=True),
+        _subject("A1", 4, False, cursada=True, bank="ALGO"),
+        _subject("A2", 4, False, bank="ALGO"),
+        _subject("A3", 4, False, bank="ALGO"),
+        _subject("S1", 4, False, bank="SOCIO"),
+        _subject("S2", 4, False, bank="SOCIO"),
+        _subject("P1", 0, False, bank="PRACTICA"),
+    ]
+    # 145 oblig + 20 + 11 = 176 (ejemplo reducido)
+    total = 145 + 20 + 11
+    banks = {"ALGO": 20, "SOCIO": 11}
+    rec = AcademicRecordBuilder().build(
+        student_name="X", program_name="Y", program_code="506",
+        pensum_version=3, version_actual=5, versiones=[3, 5],
+        total_credits=total, subjects=subs, bank_requirements=banks,
+    )
+    assert rec.total_credits == total
+    by_name = {b.name: b for b in rec.elective_banks}
+    assert by_name["ALGO"].credits_required == 20
+    assert by_name["SOCIO"].credits_required == 11
+    assert by_name["PRACTICA"].credits_required == 0
+    # ALGO aún no cubre 20 (solo 4) -> sigue ofreciendo electivas del banco
+    st = _statuses(rec)
+    assert st["A2"] == "available"
+    assert st["S1"] == "available"
+    assert st["P1"] == "available"
+
+
+def test_banco_cubierto_marca_restantes_no_requeridas():
+    subs = [
+        _subject("O1", 4, True, cursada=True),
+        _subject("E1", 4, False, cursada=True, bank="B"),
+        _subject("E2", 4, False, cursada=True, bank="B"),
+        _subject("E3", 4, False, bank="B"),
+        _subject("F1", 4, False, bank="C"),
+    ]
+    rec = AcademicRecordBuilder().build(
+        student_name="X", program_name="Y", program_code="506",
+        pensum_version=3, version_actual=5, versiones=[3],
+        total_credits=4 + 8 + 4, subjects=subs,
+        bank_requirements={"B": 8, "C": 4},
+    )
+    st = _statuses(rec)
+    assert st["E3"] == "not_needed"
+    assert st["F1"] == "available"
+    assert rec.progress_credits == 4 + 8  # oblig + B topado; C aún 0
+    assert rec.graduated is False

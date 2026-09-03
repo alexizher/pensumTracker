@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Iterator
+from collections.abc import Iterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -59,28 +59,80 @@ def validate_session(body: SessionRequest):
 def _resolve_version(scraper: PortalScraper, requested_version: int,
                      program_code: str, version_actual: int, tag: str) -> int:
     if requested_version == 0:
-        enrolled = scraper.fetch_enrolled_version(program_code)
-        scraper._pensum_version = enrolled or version_actual
-        log.info("%s: versión auto | matriculada=%s vigente=%d -> %d",
-                 tag, enrolled, version_actual, scraper._pensum_version)
-    log.info("%s: pensum_version efectiva=%d", tag, scraper._pensum_version)
+        # Usar la versión asignada al estudiante (no la vigente del programa).
+        assigned = scraper.fetch_assigned_pensum_version(program_code)
+        scraper._pensum_version = assigned or version_actual
+        log.info("%s: versión auto | asignada=%s vigente=%d -> %d",
+                 tag, assigned, version_actual, scraper._pensum_version)
+    else:
+        scraper._pensum_version = requested_version
+    log.info("%s: pensum_version efectiva=%d | enrolled=%s",
+             tag, scraper._pensum_version, scraper._enrolled_version)
     return scraper._pensum_version
 
 
-def _build_record(scraper: PortalScraper, requested_version: int, tag: str) -> AcademicRecord:
+def _iter_stages(
+    scraper: PortalScraper,
+    requested_version: int,
+    tag: str,
+) -> Iterator[dict]:
+    """Única fuente de verdad del expediente: emite las etapas en orden de
+    disponibilidad. El endpoint de streaming las serializa a NDJSON y el
+    endpoint clásico se queda con la última ("record")."""
     student_name, program_name, program_code = scraper.fetch_student_info()
     log.info("%s: student_info | program_code=%s has_name=%s", tag, program_code, bool(student_name))
+    yield {
+        "stage": "student_info",
+        "data": {
+            "student_name": student_name,
+            "program_name": program_name,
+            "program_code": program_code,
+        },
+    }
 
-    version_actual, versiones, total_credits = scraper.fetch_program_info(program_code)
-    log.info("%s: program_info | version_actual=%d versiones=%s total_credits=%d",
-             tag, version_actual, versiones, total_credits)
+    version_actual, versiones, catalog_total = scraper.fetch_program_info(program_code)
+    log.info("%s: program_info | version_actual=%d versiones=%s catalog_total=%d",
+             tag, version_actual, versiones, catalog_total)
 
-    pensum_version = _resolve_version(scraper, requested_version, program_code, version_actual, tag)
+    pensum_version = _resolve_version(
+        scraper, requested_version, program_code, version_actual, tag)
+    enrolled_version = scraper._enrolled_version
+    yield {
+        "stage": "program_info",
+        "data": {
+            "pensum_version": pensum_version,
+            "version_actual": version_actual,
+            "enrolled_version": enrolled_version,
+            "versiones": versiones,
+            "total_credits": catalog_total,
+        },
+    }
+
+    # Catálogo del pensum antes de la historia académica: la malla se puede
+    # pintar de inmediato mientras se resuelven notas y homologaciones.
+    yield {
+        "stage": "pensum",
+        "data": {"subjects": [s.model_dump() for s in scraper.fetch_pensum_subjects()]},
+    }
 
     subjects = scraper.fetch_curriculum()
     passed   = sum(1 for s in subjects if s.cursada)
     current  = sum(1 for s in subjects if s.cursando)
     log.info("%s: curriculum | total=%d cursadas=%d cursando=%d", tag, len(subjects), passed, current)
+    yield {"stage": "pensum", "data": {"subjects": [s.model_dump() for s in subjects]}}
+
+    total_credits, bank_requirements = scraper.resolve_total_credits(catalog_total, subjects)
+    if total_credits != catalog_total:
+        yield {
+            "stage": "program_info",
+            "data": {
+                "pensum_version": pensum_version,
+                "version_actual": version_actual,
+                "enrolled_version": enrolled_version,
+                "versiones": versiones,
+                "total_credits": total_credits,
+            },
+        }
 
     record = AcademicRecordBuilder().build(
         student_name=student_name,
@@ -88,83 +140,65 @@ def _build_record(scraper: PortalScraper, requested_version: int, tag: str) -> A
         program_code=program_code,
         pensum_version=pensum_version,
         version_actual=version_actual,
+        enrolled_version=enrolled_version,
         versiones=versiones,
         total_credits=total_credits,
         subjects=subjects,
+        bank_requirements=bank_requirements,
     )
     log.info(
         "%s: record construido | credits=%d/%d en_curso=%d",
         tag, record.completed_credits, record.total_credits, record.in_progress_credits,
     )
+    yield {"stage": "record", "data": record.model_dump()}
+
+
+def _build_record(scraper: PortalScraper, requested_version: int, tag: str) -> AcademicRecord:
+    record = None
+    for event in _iter_stages(scraper, requested_version, tag):
+        if event["stage"] == "record":
+            record = AcademicRecord.model_validate(event["data"])
+    if record is None:
+        raise HTTPException(status_code=502, detail="No se pudo construir el expediente")
     return record
 
 
-def _stream_record(scraper: PortalScraper, requested_version: int, tag: str) -> Iterator[str]:
+def _stream_record(
+    scraper: PortalScraper,
+    requested_version: int,
+    tag: str,
+) -> Iterator[str]:
     try:
-        student_name, program_name, program_code = scraper.fetch_student_info()
-        yield _ndjson("student_info", data={
-            "student_name": student_name,
-            "program_name": program_name,
-            "program_code": program_code,
-        })
-
-        version_actual, versiones, total_credits = scraper.fetch_program_info(program_code)
-        pensum_version = _resolve_version(scraper, requested_version, program_code, version_actual, tag)
-        yield _ndjson("program_info", data={
-            "pensum_version": pensum_version,
-            "version_actual": version_actual,
-            "versiones": versiones,
-            "total_credits": total_credits,
-        })
-
-        pensum = scraper.fetch_pensum_subjects()
-        yield _ndjson("pensum", data={"subjects": [s.model_dump() for s in pensum]})
-
-        subjects = scraper.fetch_curriculum()
-        record = AcademicRecordBuilder().build(
-            student_name=student_name,
-            program_name=program_name,
-            program_code=program_code,
-            pensum_version=pensum_version,
-            version_actual=version_actual,
-            versiones=versiones,
-            total_credits=total_credits,
-            subjects=subjects,
-        )
-        log.info("%s: record construido | credits=%d/%d en_curso=%d",
-                 tag, record.completed_credits, record.total_credits, record.in_progress_credits)
-        yield _ndjson("record", data=record.model_dump())
+        for event in _iter_stages(scraper, requested_version, tag):
+            yield _ndjson(event["stage"], data=event["data"])
     except HTTPException as exc:
         log.warning("%s: error del portal durante el streaming: %s", tag, exc.detail)
-        yield _ndjson("error", status=exc.status_code, detail=exc.detail)
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        yield _ndjson("error", status=exc.status_code, detail=detail)
     except Exception:
         log.exception("%s: error inesperado durante el streaming", tag)
         yield _ndjson("error", status=500, detail="Error inesperado al obtener el pensum")
 
 
+def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
+    log.info("%s: intento de autenticación | pensum_version=%d", tag, body.pensum_version)
+    scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
+    if not scraper.login(body.username, body.password):
+        log.warning("%s: autenticación fallida", tag)
+        raise HTTPException(status_code=401, detail="Credenciales inválidas o sesión no establecida")
+    log.info("%s: autenticación exitosa", tag)
+    return scraper
+
+
 @router.post("/login")
 def login_and_fetch(body: LoginRequest) -> AcademicRecord:
-    log.info("login: intento de autenticación | pensum_version=%d", body.pensum_version)
-    scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
-
-    if not scraper.login(body.username, body.password):
-        log.warning("login: autenticación fallida")
-        raise HTTPException(status_code=401, detail="Credenciales inválidas o sesión no establecida")
-
-    log.info("login: autenticación exitosa")
+    scraper = _login_scraper(body, "login")
     return _build_record(scraper, body.pensum_version, "login")
 
 
 @router.post("/login/stream")
 def login_and_stream(body: LoginRequest):
-    log.info("login/stream: intento de autenticación | pensum_version=%d", body.pensum_version)
-    scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
-
-    if not scraper.login(body.username, body.password):
-        log.warning("login/stream: autenticación fallida")
-        raise HTTPException(status_code=401, detail="Credenciales inválidas o sesión no establecida")
-
-    log.info("login/stream: autenticación exitosa")
+    scraper = _login_scraper(body, "login/stream")
     return StreamingResponse(
         _stream_record(scraper, body.pensum_version, "login/stream"),
         media_type="application/x-ndjson",
