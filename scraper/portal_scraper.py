@@ -35,21 +35,47 @@ def _parse_json(resp: requests.Response, context: str):
             detail="El portal de la UdeA no devolvió una respuesta válida",
         )
 
+# Palabras que el pensum agrega o quita entre versiones sin que cambie la
+# materia ("CONTROL ESTADÍSTICO DE (LA) CALIDAD").
+_FILLER_WORDS = frozenset({
+    "DE", "DEL", "LA", "EL", "LOS", "LAS", "UN", "UNA", "UNOS", "UNAS",
+    "Y", "EN", "A", "AL", "PARA", "THE", "OF",
+})
+
+
+def _normalize_name(name: str) -> str:
+    """Clave para comparar nombres de materia entre versiones: sin tildes, signos
+    ni palabras de relleno. Conserva los romanos, que sí separan materias."""
+    nfd = unicodedata.normalize("NFD", name.upper())
+    ascii_name = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    words = re.sub(r"[^A-Z0-9]+", " ", ascii_name).split()
+    return " ".join(w for w in words if w not in _FILLER_WORDS)
+
+
 # Materias que el pensum renombró entre versiones y no coinciden por nombre.
-# Claves y valores ya normalizados (sin tildes, mayúsculas).
-_NAME_ALIASES: dict[str, str] = {
-    "LECTOESCRITURA": "ESPANOL ACADEMICO",
-    "INGLES I": "ENGLISH 1",
-    "INGLES II": "ENGLISH 2",
-    "INGLES III": "ENGLISH 3",
-    "INGLES IV": "ENGLISH 4",
-    "INGLES V": "ENGLISH 5",
-    "ENGLISH 1": "INGLES I",
-    "ENGLISH 2": "INGLES II",
-    "ENGLISH 3": "INGLES III",
-    "ENGLISH 4": "INGLES IV",
-    "ENGLISH 5": "INGLES V",
-}
+# Solo se consultan si el nombre exacto no está en el pensum vigente.
+_NAME_EQUIVALENTS: tuple[tuple[str, ...], ...] = (
+    ("LECTOESCRITURA", "ESPAÑOL ACADÉMICO"),
+    ("INGLÉS I", "ENGLISH 1"),
+    ("INGLÉS II", "ENGLISH 2"),
+    ("INGLÉS III", "ENGLISH 3"),
+    ("INGLÉS IV", "ENGLISH 4"),
+    ("INGLÉS V", "ENGLISH 5"),
+    ("FORMACIÓN CIUDADANA Y CONSTITUCIONAL",
+     "CÁTEDRA DE FORMACIÓN CIUDADANA Y CONSTITUCIONAL"),
+)
+
+
+def _build_aliases(groups: tuple[tuple[str, ...], ...]) -> dict[str, tuple[str, ...]]:
+    aliases: dict[str, tuple[str, ...]] = {}
+    for group in groups:
+        keys = [_normalize_name(n) for n in group]
+        for i, key in enumerate(keys):
+            aliases[key] = tuple(k for j, k in enumerate(keys) if j != i)
+    return aliases
+
+
+_NAME_ALIASES = _build_aliases(_NAME_EQUIVALENTS)
 
 
 class _LegacyTLSAdapter(HTTPAdapter):
@@ -299,12 +325,6 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         except ValueError:
             return None
 
-    @staticmethod
-    def _normalize_name(name: str) -> str:
-        nfd = unicodedata.normalize("NFD", name.upper())
-        ascii_name = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
-        return " ".join(ascii_name.split())
-
     def _fetch_semester_grades(self, sem_code: str) -> dict[str, tuple[float | None, str]]:
         resp = self._tsone_get(self._HISTORIA_URL +
                                f"?app=ver_semestre&semestre={sem_code}")
@@ -542,18 +562,26 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             return []
 
         cursum_codes = {str(item["materia"]) for item in cursum_items}
-        name_to_code = {self._normalize_name(item["nombreMateria"]): str(
+        name_to_code = {_normalize_name(item["nombreMateria"]): str(
             item["materia"]) for item in cursum_items}
-        homologation: dict[str, float] = {}
+        homologation: dict[str, float | None] = {}
         for old_code, (grade, name) in passed_with_names.items():
-            if old_code not in cursum_codes:
-                normalized = self._normalize_name(name)
-                canonical = _NAME_ALIASES.get(normalized, normalized)
-                new_code = name_to_code.get(canonical)
-                if new_code and new_code not in homologation:
-                    log.info("fetch_curriculum: homologación %s→%s (%s)",
-                             old_code, new_code, name)
-                    homologation[new_code] = grade
+            if old_code in cursum_codes:
+                continue
+            normalized = _normalize_name(name)
+            if not normalized:
+                continue
+            new_code = name_to_code.get(normalized)
+            if new_code is None:
+                # Sin coincidencia directa: probamos los renombres conocidos.
+                for alias in _NAME_ALIASES.get(normalized, ()):
+                    new_code = name_to_code.get(alias)
+                    if new_code:
+                        break
+            if new_code and new_code not in homologation:
+                log.info("fetch_curriculum: homologación %s→%s (%s)",
+                         old_code, new_code, name)
+                homologation[new_code] = grade
 
         subjects: list[Subject] = []
         for item in cursum_items:
