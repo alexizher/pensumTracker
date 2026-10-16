@@ -5,10 +5,10 @@ import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import HTTPException
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
+from app.core.errors import PortalFormatChanged
 from models.academic import Subject
 from scraper.base import AcademicHistoryFetcher, Authenticator, CurriculumFetcher
 
@@ -37,10 +37,7 @@ def _parse_json(resp: requests.Response, context: str):
             resp.url,
             resp.text[:200],
         )
-        raise HTTPException(
-            status_code=502,
-            detail="El portal de la UdeA no devolvió una respuesta válida",
-        )
+        raise PortalFormatChanged()
 
 
 # Palabras que el pensum agrega o quita entre versiones sin que cambie la

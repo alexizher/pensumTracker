@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.core.errors import PortalError, error_payload
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -197,9 +198,14 @@ def _stream_record(
         log.warning("%s: error del portal durante el streaming: %s", tag, exc.detail)
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         yield _ndjson("error", status=exc.status_code, detail=detail)
-    except Exception:
+    except PortalError as exc:
+        log.warning("%s: error del portal durante el streaming: %s", tag, exc.detail)
+        status, detail = error_payload(exc)
+        yield _ndjson("error", status=status, detail=detail)
+    except Exception as exc:
         log.exception("%s: error inesperado durante el streaming", tag)
-        yield _ndjson("error", status=500, detail="Error inesperado al obtener el pensum")
+        status, detail = error_payload(exc)
+        yield _ndjson("error", status=status, detail=detail)
 
 
 def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
