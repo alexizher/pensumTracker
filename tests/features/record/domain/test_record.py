@@ -1,12 +1,12 @@
-"""Tests del cálculo de progreso académico (AcademicRecordBuilder).
+"""Tests del armado del expediente (build_record y sus piezas).
 
 Usan datos sintéticos: no requieren el portal de la UdeA ni una cuenta real.
 Modelo de prueba: total_credits=10, obligatorias O1+O2=8 cr,
 electivas requeridas = 10-8 = 2 cr (banco "B" con E1,E2,E3 de 2 cr c/u).
 """
 
-from models.academic import Subject
-from services.academic_service import AcademicRecordBuilder
+from app.features.record.domain.record import bank_satisfied, build_record, elective_banks
+from app.features.record.schemas import Subject
 
 TOTAL = 10
 
@@ -26,7 +26,7 @@ def _subject(code, credits, obligatoria, *, cursada=False, cursando=False, bank=
 
 
 def _build(subjects):
-    return AcademicRecordBuilder().build(
+    return build_record(
         student_name="X",
         program_name="Y",
         program_code="506",
@@ -137,7 +137,7 @@ def test_total_y_bancos_desde_requisitos_oficiales():
     # 145 oblig + 20 + 11 = 176 (ejemplo reducido)
     total = 145 + 20 + 11
     banks = {"ALGO": 20, "SOCIO": 11}
-    rec = AcademicRecordBuilder().build(
+    rec = build_record(
         student_name="X",
         program_name="Y",
         program_code="506",
@@ -168,7 +168,7 @@ def test_banco_cubierto_marca_restantes_no_requeridas():
         _subject("E3", 4, False, bank="B"),
         _subject("F1", 4, False, bank="C"),
     ]
-    rec = AcademicRecordBuilder().build(
+    rec = build_record(
         student_name="X",
         program_name="Y",
         program_code="506",
@@ -184,3 +184,59 @@ def test_banco_cubierto_marca_restantes_no_requeridas():
     assert st["F1"] == "available"
     assert rec.progress_credits == 4 + 8  # oblig + B topado; C aún 0
     assert rec.graduated is False
+
+
+def test_bank_satisfied_banco_con_cupo():
+    subs = [_subject("E1", 4, False, cursada=True, bank="B")]
+    reqs = {"B": 4, "C": 2}
+    assert bank_satisfied("B", subs, reqs, {"B": 4}, False) is True
+    assert bank_satisfied("B", subs, reqs, {"B": 3}, True) is False
+
+
+def test_bank_satisfied_banco_sin_cupo():
+    reqs = {"B": 4}
+    cursada = [_subject("P1", 0, False, cursada=True, bank="P")]
+    cursando = [_subject("P1", 0, False, cursando=True, bank="P")]
+    pendiente = [_subject("P1", 0, False, bank="P")]
+    assert bank_satisfied("P", cursada, reqs, {}, False) is True
+    assert bank_satisfied("P", cursando, reqs, {}, False) is True
+    assert bank_satisfied("P", pendiente, reqs, {}, True) is False
+
+
+def test_bank_satisfied_sin_banco_exige_todos_los_cupos():
+    reqs = {"B": 4, "C": 2}
+    assert bank_satisfied(None, [], reqs, {"B": 4, "C": 2}, False) is True
+    assert bank_satisfied(None, [], reqs, {"B": 4, "C": 1}, True) is False
+
+
+def test_bank_satisfied_sin_cupos_oficiales_usa_el_agregado():
+    subs = [_subject("P1", 0, False, cursada=True, bank="P")]
+    assert bank_satisfied("B", subs, {}, {"B": 100}, False) is False
+    assert bank_satisfied("P", subs, {}, {}, True) is True
+    assert bank_satisfied(None, subs, {}, {}, True) is True
+
+
+def test_elective_banks_ordenados_por_nombre():
+    subs = [
+        _subject("Z1", 2, False, bank="Z"),
+        _subject("A1", 3, False, cursada=True, bank="A"),
+        _subject("O1", 4, True),
+        _subject("A2", 2, False, bank="A"),
+    ]
+    banks = elective_banks(subs, {"A": 4, "Z": 2})
+    assert [(b.name, b.credits_required, b.credits_approved, b.subject_codes) for b in banks] == [
+        ("A", 4, 3, ["A1", "A2"]),
+        ("Z", 2, 0, ["Z1"]),
+    ]
+
+
+def test_elective_banks_banco_sin_cupo_oficial():
+    subs = [
+        _subject("A1", 3, False, bank="A"),
+        _subject("P1", 2, False, bank="P"),
+        _subject("P2", 3, False, bank="P"),
+    ]
+    with_reqs = {b.name: b.credits_required for b in elective_banks(subs, {"A": 3})}
+    without_reqs = {b.name: b.credits_required for b in elective_banks(subs, {})}
+    assert with_reqs == {"A": 3, "P": 0}
+    assert without_reqs == {"A": 3, "P": 5}
