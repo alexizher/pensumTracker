@@ -127,7 +127,10 @@ class FakePortal:
         key = _key(method, url)
         old = self._registered.pop(key, None)
         if old is not None:
-            self.rsps.remove(old)
+            # Por identidad: rsps.remove() compara solo método y URL base, y se
+            # llevaría las demás queries de la misma ruta (ingreso y validar).
+            registered = self.rsps.get_registry().registered
+            registered[:] = [r for r in registered if r is not old]
         if match is not None:
             self._request_matchers[key] = match
         all_matchers = _matcher_for(url) + self._request_matchers.get(key, [])

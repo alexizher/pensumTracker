@@ -132,3 +132,9 @@ def test_override_conserva_los_matchers(fake_portal: FakePortal):
     with pytest.raises(requests.exceptions.ConnectionError):
         requests.post(SSO, data={"usuario": "usuario", "clave": "otra"})
     assert requests.post(SSO, data={"usuario": "usuario", "clave": "clave"}).status_code == 500
+
+
+def test_override_no_toca_otras_queries_de_la_misma_ruta(fake_portal: FakePortal):
+    fake_portal.override("POST", validar_url(TSONE_HOST), json={"error": "clave"})
+    ingreso = requests.post("https://tsone.udea.edu.co/php_relogin/?app=ingreso")
+    assert ingreso.status_code == 200
