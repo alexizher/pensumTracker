@@ -27,7 +27,14 @@ def fake_portal(fake_portal_factory: Callable[..., FakePortal]) -> FakePortal:
 @pytest.fixture(autouse=True)
 def _configuracion_hermetica(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Ningún test lee el .env del desarrollador ni variables de configuración."""
-    for name in ("ALLOWED_ORIGINS", "PORTAL_CONNECT_TIMEOUT", "PORTAL_READ_TIMEOUT"):
+    for name in (
+        "ALLOWED_ORIGINS",
+        "PORTAL_CONNECT_TIMEOUT",
+        "PORTAL_READ_TIMEOUT",
+        "TSONE_URL",
+        "AYUDAME2_URL",
+        "CURSUM_URL",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     get_settings.cache_clear()
