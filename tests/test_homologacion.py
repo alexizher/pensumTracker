@@ -8,6 +8,7 @@ No tocan la red: se sustituyen las llamadas al portal.
 
 import pytest
 
+from app.portal.session import PortalSession
 from scraper.portal_scraper import PortalScraper, _normalize_name
 
 
@@ -25,7 +26,7 @@ def _item(code, name, credits=1, nivel=1):
 
 def _scraper(cursum_items, passed, cursando=()):
     """PortalScraper con las respuestas del portal ya resueltas."""
-    s = PortalScraper(cookies={})
+    s = PortalScraper(PortalSession())
     s.fetch_student_info = lambda: ("Estudiante", "INGENIERÍA DE SISTEMAS", "504")
     s._fetch_cursum_items = lambda: cursum_items
     s._fetch_passed_with_names = lambda: passed

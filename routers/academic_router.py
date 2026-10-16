@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.errors import PortalError, error_payload
+from app.portal.session import PortalSession
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -30,7 +31,7 @@ class LoginRequest(BaseModel):
 
 
 def get_scraper(body: SessionRequest) -> PortalScraper:
-    return PortalScraper(cookies=body.cookies, pensum_version=body.pensum_version)
+    return PortalScraper.from_cookies(body.cookies, pensum_version=body.pensum_version)
 
 
 def _ndjson(stage: str, **payload) -> str:
@@ -210,7 +211,7 @@ def _stream_record(
 
 def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
     log.info("%s: intento de autenticación | pensum_version=%d", tag, body.pensum_version)
-    scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
+    scraper = PortalScraper(PortalSession(), pensum_version=body.pensum_version)
     if not scraper.login(body.username, body.password):
         log.warning("%s: autenticación fallida", tag)
         raise HTTPException(

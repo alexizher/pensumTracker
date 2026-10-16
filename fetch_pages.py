@@ -5,6 +5,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from app.portal.session import PortalSession
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
 
@@ -137,7 +138,7 @@ def main():
     username = input("\n  Usuario: ").strip()
     password = getpass.getpass("  Contraseña: ")
 
-    scraper = PortalScraper(cookies={})
+    scraper = PortalScraper(PortalSession())
     print("\n  Autenticando…")
     if not scraper.login(username, password):
         print("  ✗ Login fallido.")
