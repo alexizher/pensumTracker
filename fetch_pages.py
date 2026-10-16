@@ -1,18 +1,19 @@
-from services.academic_service import AcademicRecordBuilder
-from scraper.portal_scraper import PortalScraper
-import sys
 import getpass
 import logging
+import sys
 from pathlib import Path
+
 from bs4 import BeautifulSoup
+
+from scraper.portal_scraper import PortalScraper
+from services.academic_service import AcademicRecordBuilder
 
 """
 ESTE ARCHIVO ES SOLO PARA EXPLORACIÓN MANUAL DE LAS PÁGINAS, NO PARA USO AUTOMÁTICO
 Con este archivo puedes hacer tests manuales de forma local
 """
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(levelname)s  %(name)s — %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s — %(message)s")
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -79,13 +80,14 @@ def show_curriculum(scraper: PortalScraper):
     print("  — fetch_curriculum() —")
     _, _, program_code = scraper.fetch_student_info()
 
-    version_actual, versiones, total_credits = scraper.fetch_program_info(
-        program_code)
+    version_actual, versiones, total_credits = scraper.fetch_program_info(program_code)
     print(
-        f"  Versión actual: {version_actual}  |  Versiones: {versiones}  |  Créditos grado: {total_credits}")
+        f"  Versión actual: {version_actual}  |  Versiones: {versiones}  |  Créditos grado: {total_credits}"
+    )
 
-    pensum_v = int(input(
-        f"  Versión del pensum a usar [{version_actual}]: ").strip() or version_actual)
+    pensum_v = int(
+        input(f"  Versión del pensum a usar [{version_actual}]: ").strip() or version_actual
+    )
     scraper._pensum_version = pensum_v
 
     subjects = scraper.fetch_curriculum()
@@ -96,13 +98,13 @@ def show_curriculum(scraper: PortalScraper):
         by_status.setdefault(s.status, []).append(s)
     for status, group in sorted(by_status.items()):
         print(
-            f"    {status:<12} {len(group):>3} materias  |  {sum(s.credits for s in group)} créditos")
+            f"    {status:<12} {len(group):>3} materias  |  {sum(s.credits for s in group)} créditos"
+        )
 
     print()
     print("  Primeras 10 materias:")
     for s in subjects[:10]:
-        print(
-            f"    [{s.code}] {s.name[:38]:<38}  sem={s.semester}  cr={s.credits}  {s.status}")
+        print(f"    [{s.code}] {s.name[:38]:<38}  sem={s.semester}  cr={s.credits}  {s.status}")
 
     student_name, program_name, _ = scraper.fetch_student_info()
     record = AcademicRecordBuilder().build(
@@ -117,8 +119,7 @@ def show_curriculum(scraper: PortalScraper):
     )
     print()
     print("  — AcademicRecord —")
-    avance = record.completed_credits / record.total_credits * \
-        100 if record.total_credits else 0
+    avance = record.completed_credits / record.total_credits * 100 if record.total_credits else 0
     print(f"  Créditos totales : {record.total_credits}")
     print(f"  Créditos aprob.  : {record.completed_credits}  ({avance:.1f}%)")
     print(f"  Créditos en curso: {record.in_progress_credits}")
@@ -169,7 +170,7 @@ def main():
 
     # Paso 4 — simulación del selector de programas
     print(SEP)
-    print(f"  [4] Simulación selector de programas")
+    print("  [4] Simulación selector de programas")
     print(f"  URL: {_PROGRAMAS_URL}")
     resp = scraper._tsone_get(_PROGRAMAS_URL)
     print(f"  Status: {resp.status_code}  |  Final URL: {resp.url}")
@@ -193,8 +194,7 @@ def main():
         for sel in selects:
             print(f"    name={sel.get('name')!r}")
             for opt in sel.find_all("option"):
-                print(
-                    f"      value={opt.get('value')!r}  texto={opt.get_text(strip=True)!r}")
+                print(f"      value={opt.get('value')!r}  texto={opt.get_text(strip=True)!r}")
 
         print(f"  <input type=radio> encontrados : {len(radios)}")
         for r in radios:
@@ -212,32 +212,29 @@ def main():
     if form:
         option = soup.find("option", {"value": program_code})
         if not option:
-            print(
-                f"  ATENCIÓN: programa {program_code!r} no encontrado en el selector")
+            print(f"  ATENCIÓN: programa {program_code!r} no encontrado en el selector")
         else:
             form2 = soup.find("form", {"id": "form2"})
             action = (form2.get("action") if form2 else None) or resp.url
             form_data = {
-                "facultad":        option.get("data-facultad", ""),
+                "facultad": option.get("data-facultad", ""),
                 "nombre_facultad": option.get("data-nombre-facultad", ""),
-                "programa":        program_code,
+                "programa": program_code,
                 "nombre_programa": option.get_text(strip=True),
                 "maximo_semestre": option.get("data-maximo-semestre", ""),
-                "version":         option.get("data-version", ""),
-                "estado":          option.get("data-estado", ""),
-                "tipo":            option.get("data-tipo", ""),
-                "mas_programas":   "",
-                "api":             "programasudea",
+                "version": option.get("data-version", ""),
+                "estado": option.get("data-estado", ""),
+                "tipo": option.get("data-tipo", ""),
+                "mas_programas": "",
+                "api": "programasudea",
             }
             print(f"  Datos del POST a form2: {form_data}")
             post_resp = scraper._tsone_post(action, form_data)
-            print(
-                f"  POST status={post_resp.status_code}  url={post_resp.url}")
+            print(f"  POST status={post_resp.status_code}  url={post_resp.url}")
             save("4b_post_form2.html", post_resp.text)
 
-            print(f"  GET historia después de la selección…")
-            hist_resp = scraper._tsone_get(
-                scraper._HISTORIA_URL + "?app=consultar")
+            print("  GET historia después de la selección…")
+            hist_resp = scraper._tsone_get(scraper._HISTORIA_URL + "?app=consultar")
             print(f"  GET status={hist_resp.status_code}  url={hist_resp.url}")
             result_soup = BeautifulSoup(hist_resp.text, "lxml")
             semestres = result_soup.find_all(attrs={"data-semestre": True})

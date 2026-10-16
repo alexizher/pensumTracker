@@ -4,26 +4,37 @@ Usan datos sintéticos: no requieren el portal de la UdeA ni una cuenta real.
 Modelo de prueba: total_credits=10, obligatorias O1+O2=8 cr,
 electivas requeridas = 10-8 = 2 cr (banco "B" con E1,E2,E3 de 2 cr c/u).
 """
+
 from models.academic import Subject
 from services.academic_service import AcademicRecordBuilder
 
 TOTAL = 10
 
 
-def _subject(code, credits, obligatoria, *, cursada=False, cursando=False,
-             bank=None, prereqs=None):
+def _subject(code, credits, obligatoria, *, cursada=False, cursando=False, bank=None, prereqs=None):
     return Subject(
-        code=code, name=code, credits=credits, semester=1,
-        obligatoria=obligatoria, elective_bank=bank,
-        prerequisites=prereqs or [], cursada=cursada, cursando=cursando,
+        code=code,
+        name=code,
+        credits=credits,
+        semester=1,
+        obligatoria=obligatoria,
+        elective_bank=bank,
+        prerequisites=prereqs or [],
+        cursada=cursada,
+        cursando=cursando,
     )
 
 
 def _build(subjects):
     return AcademicRecordBuilder().build(
-        student_name="X", program_name="Y", program_code="506",
-        pensum_version=3, version_actual=5, versiones=[3, 5],
-        total_credits=TOTAL, subjects=subjects,
+        student_name="X",
+        program_name="Y",
+        program_code="506",
+        pensum_version=3,
+        version_actual=5,
+        versiones=[3, 5],
+        total_credits=TOTAL,
+        subjects=subjects,
     )
 
 
@@ -61,11 +72,11 @@ def test_electivas_de_mas_no_pasan_de_100_y_obligatoria_pendiente_visible():
         _subject("E3", 2, False, cursada=True, bank="B"),
     ]
     rec = _build(subs)
-    assert rec.completed_credits == 10      # todo lo aprobado (4 + 6)
-    assert rec.progress_credits == 6        # 4 oblig + min(6,2) electivas
+    assert rec.completed_credits == 10  # todo lo aprobado (4 + 6)
+    assert rec.progress_credits == 6  # 4 oblig + min(6,2) electivas
     assert rec.graduated is False
     st = _statuses(rec)
-    assert st["O2"] == "available"          # la obligatoria pendiente sí se ofrece
+    assert st["O2"] == "available"  # la obligatoria pendiente sí se ofrece
     # ninguna electiva debe ofrecerse: el requisito ya está cubierto
     assert all(s != "available" for c, s in st.items() if c.startswith("E"))
 
@@ -82,19 +93,19 @@ def test_estudiante_normal_ofrece_electivas_y_obligatorias():
     assert rec.graduated is False
     st = _statuses(rec)
     assert st["O2"] == "available"
-    assert st["E1"] == "available"          # faltan electivas -> disponible
+    assert st["E1"] == "available"  # faltan electivas -> disponible
     assert st["E2"] == "available"
 
 
 def test_prerrequisitos_bloquean():
     subs = [
-        _subject("O1", 4, True),            # sin aprobar
+        _subject("O1", 4, True),  # sin aprobar
         _subject("O2", 4, True, prereqs=["O1"]),
     ]
     rec = _build(subs)
     st = _statuses(rec)
     assert st["O1"] == "available"
-    assert st["O2"] == "locked"             # su prerrequisito no está cumplido
+    assert st["O2"] == "locked"  # su prerrequisito no está cumplido
 
 
 def test_en_curso_cuenta_para_satisfacer_electivas():
@@ -108,7 +119,7 @@ def test_en_curso_cuenta_para_satisfacer_electivas():
     rec = _build(subs)
     st = _statuses(rec)
     assert st["E1"] == "in_progress"
-    assert st["E2"] == "not_needed"         # ya hay 2 cr de electivas en curso
+    assert st["E2"] == "not_needed"  # ya hay 2 cr de electivas en curso
 
 
 def test_total_y_bancos_desde_requisitos_oficiales():
@@ -127,9 +138,15 @@ def test_total_y_bancos_desde_requisitos_oficiales():
     total = 145 + 20 + 11
     banks = {"ALGO": 20, "SOCIO": 11}
     rec = AcademicRecordBuilder().build(
-        student_name="X", program_name="Y", program_code="506",
-        pensum_version=3, version_actual=5, versiones=[3, 5],
-        total_credits=total, subjects=subs, bank_requirements=banks,
+        student_name="X",
+        program_name="Y",
+        program_code="506",
+        pensum_version=3,
+        version_actual=5,
+        versiones=[3, 5],
+        total_credits=total,
+        subjects=subs,
+        bank_requirements=banks,
     )
     assert rec.total_credits == total
     by_name = {b.name: b for b in rec.elective_banks}
@@ -152,9 +169,14 @@ def test_banco_cubierto_marca_restantes_no_requeridas():
         _subject("F1", 4, False, bank="C"),
     ]
     rec = AcademicRecordBuilder().build(
-        student_name="X", program_name="Y", program_code="506",
-        pensum_version=3, version_actual=5, versiones=[3],
-        total_credits=4 + 8 + 4, subjects=subs,
+        student_name="X",
+        program_name="Y",
+        program_code="506",
+        pensum_version=3,
+        version_actual=5,
+        versiones=[3],
+        total_credits=4 + 8 + 4,
+        subjects=subs,
         bank_requirements={"B": 8, "C": 4},
     )
     st = _statuses(rec)

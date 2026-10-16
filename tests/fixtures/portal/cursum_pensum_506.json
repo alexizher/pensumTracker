@@ -1,0 +1,107 @@
+[
+  {
+    "materia": 2000100,
+    "nombreMateria": "CÁLCULO DE PRUEBA",
+    "creditos": 4,
+    "nivel": 1,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": []
+  },
+  {
+    "materia": 2000120,
+    "nombreMateria": "FÍSICA DE PRUEBA",
+    "creditos": 3,
+    "nivel": 1,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": []
+  },
+  {
+    "materia": 2000300,
+    "nombreMateria": "PROGRAMACIÓN DE PRUEBA",
+    "creditos": 4,
+    "nivel": 2,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": [
+      {
+        "materiaRequisito": 2000100,
+        "tipoRequisito": "PRERREQ"
+      }
+    ]
+  },
+  {
+    "materia": 2000400,
+    "nombreMateria": "ESTRUCTURAS DE PRUEBA",
+    "creditos": 4,
+    "nivel": 3,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": [
+      {
+        "materiaRequisito": 2000300,
+        "tipoRequisito": "PRERREQ"
+      }
+    ]
+  },
+  {
+    "materia": 2000500,
+    "nombreMateria": "MECÁNICA DE PRUEBA",
+    "creditos": 3,
+    "nivel": 3,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": [
+      {
+        "materiaRequisito": 2000120,
+        "tipoRequisito": "PRERREQ"
+      }
+    ]
+  },
+  {
+    "materia": 2517450,
+    "nombreMateria": "CÁTEDRA DE FORMACIÓN CIUDADANA Y CONSTITUCIONAL",
+    "creditos": 0,
+    "nivel": 1,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": []
+  },
+  {
+    "materia": 2600001,
+    "nombreMateria": "ELECTIVA VIEJA A",
+    "creditos": 2,
+    "nivel": 5,
+    "tipoMateria": "ELECTIVA",
+    "nombreBancoElectiva": "BANCO HUMANIDADES",
+    "requisitos": []
+  },
+  {
+    "materia": 2600002,
+    "nombreMateria": "ELECTIVA B",
+    "creditos": 2,
+    "nivel": 5,
+    "tipoMateria": "ELECTIVA",
+    "nombreBancoElectiva": "BANCO HUMANIDADES",
+    "requisitos": []
+  },
+  {
+    "materia": 2600003,
+    "nombreMateria": "ELECTIVA C",
+    "creditos": 2,
+    "nivel": 5,
+    "tipoMateria": "ELECTIVA",
+    "nombreBancoElectiva": "BANCO HUMANIDADES",
+    "requisitos": []
+  },
+  {
+    "materia": 2600010,
+    "nombreMateria": "ELECTIVA TÉCNICA D",
+    "creditos": 3,
+    "nivel": 6,
+    "tipoMateria": "ELECTIVA",
+    "nombreBancoElectiva": "BANCO TÉCNICO",
+    "requisitos": []
+  }
+]

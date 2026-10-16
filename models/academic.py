@@ -32,9 +32,11 @@ class AcademicRecord(BaseModel):
     enrolled_version: int | None = None  # versión asignada al estudiante
     versiones: list[int]
     total_credits: int
-    completed_credits: int       # todos los créditos aprobados (puede superar total_credits)
-    progress_credits: int        # créditos que cuentan para el grado (electivas topadas), <= total_credits
+    completed_credits: int  # todos los créditos aprobados (puede superar total_credits)
+    progress_credits: (
+        int  # créditos que cuentan para el grado (electivas topadas), <= total_credits
+    )
     in_progress_credits: int
-    graduated: bool = False      # True si ya cumplió todos los créditos del grado
+    graduated: bool = False  # True si ya cumplió todos los créditos del grado
     subjects: list[Subject]
     elective_banks: list[ElectiveBank] = []

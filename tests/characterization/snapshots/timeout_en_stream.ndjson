@@ -1,0 +1,3 @@
+{"stage": "student_info", "data": {"student_name": "ANA PRUEBA", "program_name": "INGENIERÍA DE PRUEBA", "program_code": "506"}}
+{"stage": "program_info", "data": {"pensum_version": 5, "version_actual": 5, "enrolled_version": 5, "versiones": [3, 5], "total_credits": 30}}
+{"stage": "error", "status": 500, "detail": "Error inesperado al obtener el pensum"}

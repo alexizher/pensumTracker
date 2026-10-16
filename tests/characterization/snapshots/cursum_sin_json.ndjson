@@ -1,0 +1,2 @@
+{"stage": "student_info", "data": {"student_name": "ANA PRUEBA", "program_name": "INGENIERÍA DE PRUEBA", "program_code": "506"}}
+{"stage": "error", "status": 502, "detail": "El portal de la UdeA no devolvió una respuesta válida"}

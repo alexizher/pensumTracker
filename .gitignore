@@ -56,3 +56,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Páginas guardadas del portal (datos personales)
+/pages/
