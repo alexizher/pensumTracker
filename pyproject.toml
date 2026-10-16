@@ -1,0 +1,21 @@
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["pages"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.14"
+ignore_missing_imports = true
+exclude = ["^pages/", "^\\.venv/"]
+
+[[tool.mypy.overrides]]
+# Se quita en el PR 3, cuando los parsers salen del scraper.
+module = "scraper.portal_scraper"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
