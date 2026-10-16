@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -56,18 +57,28 @@ def validate_session(body: SessionRequest):
     }
 
 
-def _resolve_version(scraper: PortalScraper, requested_version: int,
-                     program_code: str, version_actual: int, tag: str) -> int:
+def _resolve_version(
+    scraper: PortalScraper, requested_version: int, program_code: str, version_actual: int, tag: str
+) -> int:
     if requested_version == 0:
         # Usar la versión asignada al estudiante (no la vigente del programa).
         assigned = scraper.fetch_assigned_pensum_version(program_code)
         scraper._pensum_version = assigned or version_actual
-        log.info("%s: versión auto | asignada=%s vigente=%d -> %d",
-                 tag, assigned, version_actual, scraper._pensum_version)
+        log.info(
+            "%s: versión auto | asignada=%s vigente=%d -> %d",
+            tag,
+            assigned,
+            version_actual,
+            scraper._pensum_version,
+        )
     else:
         scraper._pensum_version = requested_version
-    log.info("%s: pensum_version efectiva=%d | enrolled=%s",
-             tag, scraper._pensum_version, scraper._enrolled_version)
+    log.info(
+        "%s: pensum_version efectiva=%d | enrolled=%s",
+        tag,
+        scraper._pensum_version,
+        scraper._enrolled_version,
+    )
     return scraper._pensum_version
 
 
@@ -80,7 +91,9 @@ def _iter_stages(
     disponibilidad. El endpoint de streaming las serializa a NDJSON y el
     endpoint clásico se queda con la última ("record")."""
     student_name, program_name, program_code = scraper.fetch_student_info()
-    log.info("%s: student_info | program_code=%s has_name=%s", tag, program_code, bool(student_name))
+    log.info(
+        "%s: student_info | program_code=%s has_name=%s", tag, program_code, bool(student_name)
+    )
     yield {
         "stage": "student_info",
         "data": {
@@ -91,11 +104,15 @@ def _iter_stages(
     }
 
     version_actual, versiones, catalog_total = scraper.fetch_program_info(program_code)
-    log.info("%s: program_info | version_actual=%d versiones=%s catalog_total=%d",
-             tag, version_actual, versiones, catalog_total)
+    log.info(
+        "%s: program_info | version_actual=%d versiones=%s catalog_total=%d",
+        tag,
+        version_actual,
+        versiones,
+        catalog_total,
+    )
 
-    pensum_version = _resolve_version(
-        scraper, requested_version, program_code, version_actual, tag)
+    pensum_version = _resolve_version(scraper, requested_version, program_code, version_actual, tag)
     enrolled_version = scraper._enrolled_version
     yield {
         "stage": "program_info",
@@ -116,9 +133,11 @@ def _iter_stages(
     }
 
     subjects = scraper.fetch_curriculum()
-    passed   = sum(1 for s in subjects if s.cursada)
-    current  = sum(1 for s in subjects if s.cursando)
-    log.info("%s: curriculum | total=%d cursadas=%d cursando=%d", tag, len(subjects), passed, current)
+    passed = sum(1 for s in subjects if s.cursada)
+    current = sum(1 for s in subjects if s.cursando)
+    log.info(
+        "%s: curriculum | total=%d cursadas=%d cursando=%d", tag, len(subjects), passed, current
+    )
     yield {"stage": "pensum", "data": {"subjects": [s.model_dump() for s in subjects]}}
 
     total_credits, bank_requirements = scraper.resolve_total_credits(catalog_total, subjects)
@@ -148,7 +167,10 @@ def _iter_stages(
     )
     log.info(
         "%s: record construido | credits=%d/%d en_curso=%d",
-        tag, record.completed_credits, record.total_credits, record.in_progress_credits,
+        tag,
+        record.completed_credits,
+        record.total_credits,
+        record.in_progress_credits,
     )
     yield {"stage": "record", "data": record.model_dump()}
 
@@ -185,7 +207,9 @@ def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
     scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
     if not scraper.login(body.username, body.password):
         log.warning("%s: autenticación fallida", tag)
-        raise HTTPException(status_code=401, detail="Credenciales inválidas o sesión no establecida")
+        raise HTTPException(
+            status_code=401, detail="Credenciales inválidas o sesión no establecida"
+        )
     log.info("%s: autenticación exitosa", tag)
     return scraper
 

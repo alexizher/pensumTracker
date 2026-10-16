@@ -1,5 +1,6 @@
 from collections import defaultdict
-from models.academic import Subject, ElectiveBank, AcademicRecord
+
+from models.academic import AcademicRecord, ElectiveBank, Subject
 
 
 class AcademicRecordBuilder:
@@ -44,8 +45,7 @@ class AcademicRecordBuilder:
         if bank_requirements:
             electives_required = sum(bank_requirements.values())
             elective_progress = sum(
-                min(bank_progress.get(name, 0), req)
-                for name, req in bank_requirements.items()
+                min(bank_progress.get(name, 0), req) for name, req in bank_requirements.items()
             )
 
             def bank_satisfied(bank: str | None) -> bool:
@@ -55,23 +55,17 @@ class AcademicRecordBuilder:
                     # Banco sin cupo de créditos (p.ej. práctica 0 cr):
                     # satisfecho si ya cursó o cursa alguna materia del banco.
                     return any(
-                        (s.cursada or s.cursando) and s.elective_bank == bank
-                        for s in subjects
+                        (s.cursada or s.cursando) and s.elective_bank == bank for s in subjects
                     )
                 return all(
-                    bank_progress.get(name, 0) >= req
-                    for name, req in bank_requirements.items()
+                    bank_progress.get(name, 0) >= req for name, req in bank_requirements.items()
                 )
 
-            electives_satisfied = all(
-                bank_satisfied(name) for name in bank_requirements
-            )
+            electives_satisfied = all(bank_satisfied(name) for name in bank_requirements)
         else:
             electives_required = max(0, total_credits - obligatorias_total)
             elective_progress = min(electives_passed, electives_required)
-            electives_satisfied = (
-                electives_passed + electives_in_progress >= electives_required
-            )
+            electives_satisfied = electives_passed + electives_in_progress >= electives_required
 
             def bank_satisfied(bank: str | None) -> bool:
                 return electives_satisfied
