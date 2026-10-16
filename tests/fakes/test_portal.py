@@ -1,6 +1,7 @@
 import pytest
 import requests
 
+from routers.academic_router import _build_record
 from scraper.portal_scraper import PortalScraper
 from tests.fakes.portal import CURSUM, FakePortal
 
@@ -43,3 +44,12 @@ def test_override_acepta_excepcion(fake_portal: FakePortal):
     fake_portal.override("GET", f"{CURSUM}/programas", body=requests.exceptions.Timeout("lento"))
     with pytest.raises(requests.exceptions.Timeout):
         PortalScraper(cookies={}).fetch_program_info("506")
+
+
+def test_expediente_tiene_una_materia_bloqueada_y_una_disponible(fake_portal):
+    s = PortalScraper(cookies={})
+    assert s.login("usuario", "clave")
+    record = _build_record(s, 5, "test")
+    estados = {sub.code: sub.status for sub in record.subjects}
+    assert estados["2000500"] == "locked"
+    assert estados["2000400"] == "available"

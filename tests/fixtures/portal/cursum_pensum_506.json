@@ -46,6 +46,20 @@
     ]
   },
   {
+    "materia": 2000500,
+    "nombreMateria": "MECÁNICA DE PRUEBA",
+    "creditos": 3,
+    "nivel": 3,
+    "tipoMateria": "OBLIGATORIA",
+    "nombreBancoElectiva": "",
+    "requisitos": [
+      {
+        "materiaRequisito": 2000120,
+        "tipoRequisito": "PRERREQ"
+      }
+    ]
+  },
+  {
     "materia": 2517450,
     "nombreMateria": "CÁTEDRA DE FORMACIÓN CIUDADANA Y CONSTITUCIONAL",
     "creditos": 0,
