@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Generator, Iterator
 from typing import cast
 
@@ -18,7 +19,7 @@ from app.portal.session import PortalSession
 from main import app
 from routers.academic_router import _stream_record
 from scraper.portal_scraper import PortalScraper
-from tests.fakes.portal import AYUDAME2, FakePortal, fixture, validar_url
+from tests.fakes.portal import AYUDAME2, CURSUM, FakePortal, fixture, validar_url
 
 URL = "/api/login/stream"
 BODY = {"username": "usuario", "password": "clave", "pensum_version": 0}
@@ -104,6 +105,9 @@ def _response(session: PortalSession) -> ClosingStreamingResponse:
 
 
 def test_corte_del_cliente_tras_el_primer_chunk_cierra_la_sesion(fake_portal: FakePortal):
+    # No discrimina sin on_close: el generador se cierra por GC y la sesión se
+    # cierra igual. Quienes prueban on_close son los tests de http.disconnect y
+    # de respuesta sin iterar.
     session = LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
     sent: list[str] = []
 
@@ -152,3 +156,41 @@ def test_respuesta_sin_iterar_cierra_la_sesion(fake_portal: FakePortal):
         anyio.run(run)
     assert session.closed is True
     assert session.credentials is None
+
+
+def test_login_no_stream_cierra_la_sesion(fake_portal: FakePortal, provider: RecordingProvider):
+    with TestClient(app) as client:
+        response = client.post("/api/login", json=BODY)
+    assert response.status_code == 200
+    (session,) = provider.sessions
+    assert session.closed is True
+    assert session.credentials is None
+
+
+def test_academic_record_cierra_la_sesion(fake_portal: FakePortal, monkeypatch):
+    original = PortalSession.from_cookies.__func__  # type: ignore[attr-defined]
+    sessions: list[PortalSession] = []
+
+    def spy(cls, cookies):
+        session = original(cls, cookies)
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(PortalSession, "from_cookies", classmethod(spy))
+    body = {"cookies": {"user_name": "u"}, "pensum_version": 0}
+    with TestClient(app) as client:
+        response = client.post("/api/academic-record", json=body)
+    assert response.status_code == 200
+    (session,) = sessions
+    assert session.closed is True
+
+
+def test_error_de_red_en_stream_conserva_la_causa(fake_portal: FakePortal, caplog):
+    fake_portal.override("GET", f"{CURSUM}/pensum/506/5", body=requests.ReadTimeout())
+    with caplog.at_level(logging.WARNING, logger="routers.academic_router"):
+        with TestClient(app) as client:
+            client.post(URL, json=BODY)
+    records = [r for r in caplog.records if "durante el streaming" in r.getMessage()]
+    assert len(records) == 1
+    assert records[0].exc_info is not None
+    assert "ReadTimeout" in caplog.text
