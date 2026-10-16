@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 from requests.adapters import BaseAdapter
@@ -6,6 +6,9 @@ from requests.adapters import BaseAdapter
 from app.core.config import get_settings
 from app.core.errors import PortalUnavailable
 from app.portal.tls import LegacyTLSAdapter, is_udea_host
+
+if TYPE_CHECKING:
+    from app.portal.credentials import PortalCredentials
 
 _USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -24,8 +27,7 @@ class PortalSession(requests.Session):
         self._legacy_adapter = LegacyTLSAdapter()
         self.headers.update({"User-Agent": _USER_AGENT})
         self.udeasecure: str = ""
-        # Task 4 lo tipa como PortalCredentials | None.
-        self.credentials: object | None = None
+        self.credentials: PortalCredentials | None = None
         self.closed: bool = False
 
     def get_adapter(self, url: str) -> BaseAdapter:

@@ -4,8 +4,11 @@ import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
+from pydantic import SecretStr
 
 from app.core.errors import PortalFormatChanged
+from app.portal import auth
+from app.portal.credentials import PortalCredentials
 from app.portal.session import PortalSession
 from models.academic import Subject
 from scraper.base import AcademicHistoryFetcher, Authenticator, CurriculumFetcher
@@ -103,7 +106,6 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     def __init__(self, session: PortalSession, pensum_version: int = 0):
         self._session = session
         self._pensum_version = pensum_version
-        self._password: str | None = None
         self._student_cache: tuple[str, str, str] | None = None
         self._info_cache: BeautifulSoup | None = None
         self._cursum_cache: list[dict] | None = None
@@ -116,85 +118,19 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     def from_cookies(cls, cookies: dict[str, str], pensum_version: int = 0) -> "PortalScraper":
         return cls(PortalSession.from_cookies(cookies), pensum_version)
 
-    def _do_reauth(self, host: str, password: str) -> str | None:
-        relogin_base = f"https://{host}/php_relogin/"
-        reauth_end = f"https://{host}/php_libs/reauthenticate_end.php"
-
-        self._session.post(
-            relogin_base + "?app=ingreso",
-            data={"urlref": reauth_end},
-            allow_redirects=True,
-        )
-
-        resp = self._session.post(
-            relogin_base + "?app=validar",
-            data={"clave": password},
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, */*",
-            },
-        )
-        try:
-            data = resp.json()
-        except Exception:
-            return None
-
-        if data.get("error") or "hash" not in data:
-            return None
-
-        h = data["hash"]
-        self._session.set_udeasecure(h)
-
-        end_resp = self._session.get(f"{reauth_end}?hash={h}", allow_redirects=True)
-        end_soup = BeautifulSoup(end_resp.text, "lxml")
-        auto_form = end_soup.find("form")
-        if auto_form:
-            action = auto_form.get("action", "")
-            if action:
-                final_resp = self._session.post(action, data={}, allow_redirects=True)
-                return final_resp.text
-        return None
-
     def login(self, username: str, password: str) -> bool:
-        log.info("login: SSO ayudame2")
-        sso = self._session.post(
-            "https://ayudame2.udea.edu.co/php_mua_externos/",
-            data={"usuario": username, "clave": password},
-            allow_redirects=True,
-        )
-        log.info("login: SSO status=%d final_url=%s", sso.status_code, sso.url)
-        if sso.status_code != 200:
-            log.warning("login: SSO falló con status=%d", sso.status_code)
-            return False
-        self._session.cookies.set("user_name", username, domain=".udea.edu.co", path="/")
-
-        self._session.get(self._HISTORIA_URL + "?app=consultar", allow_redirects=True)
-        log.info("login: reauth tsone")
-        self._do_reauth("tsone.udea.edu.co", password)
-        if not self._session.udeasecure:
-            log.warning("login: reauth tsone falló, udeasecure vacío")
-            return False
-        log.info("login: reauth tsone ok | udeasecure presente=True")
-
-        # El pensum oficial (mínimos por banco) vive en ayudame2.
-        log.info("login: reauth ayudame2")
-        self._do_reauth("ayudame2.udea.edu.co", password)
-        self._password = password
-
-        resp = self._session.tsone_get(self._INFO_URL + "?app=consultar")
-        self._info_cache = BeautifulSoup(resp.text, "lxml")
-        log.info("login: constancia GET status=%d final_url=%s", resp.status_code, resp.url)
-
-        valid = self.validate_session()
-        log.info("login: validate_session=%s", valid)
+        credentials = PortalCredentials(username, SecretStr(password))
+        valid = auth.login(self._session, credentials)
+        if valid:
+            self._session.credentials = credentials
         return valid
 
     def logout(self) -> None:
+        self._session.close()
         self._session.cookies.clear()
-        self._session.udeasecure = ""
-        self._password = None
         self._student_cache = None
         self._info_cache = None
+        self._cursum_cache = None
         self._bank_requirements_cache = None
 
     def _fetch_historia_soup(self, program_code: str) -> BeautifulSoup:
@@ -286,14 +222,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         return self._info_cache
 
     def validate_session(self) -> bool:
-        resp = self._session.tsone_get(self._HISTORIA_URL + "?app=consultar")
-        invalid = (
-            resp.status_code != 200
-            or "php_relogin" in resp.url
-            or "No hay usuario conectado" in resp.text
-            or "php_relogin" in resp.text
-        )
-        return not invalid
+        return auth.validate(self._session)
 
     def _parse_grade(self, raw: str) -> float | None:
         raw = raw.strip()
@@ -410,9 +339,12 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             self._PENSUM_URL + "?app=consultar",
             allow_redirects=True,
         )
-        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and self._password:
+        credentials = self._session.credentials
+        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and credentials:
             log.info("fetch_elective_bank_requirements: reauth ayudame2")
-            self._do_reauth("ayudame2.udea.edu.co", self._password)
+            auth.reauth(
+                self._session, "ayudame2.udea.edu.co", credentials.password.get_secret_value()
+            )
             resp = self._session.get(
                 self._PENSUM_URL + "?app=consultar",
                 allow_redirects=True,

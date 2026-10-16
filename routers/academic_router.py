@@ -2,12 +2,12 @@ import json
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 from app.core.errors import PortalError, error_payload
-from app.portal.session import PortalSession
+from app.portal.credentials import PortalCredentials, SessionProvider, get_session_provider
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -207,29 +207,31 @@ def _stream_record(
         log.exception("%s: error inesperado durante el streaming", tag)
         status, detail = error_payload(exc)
         yield _ndjson("error", status=status, detail=detail)
+    finally:
+        scraper.logout()
 
 
-def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
+def _login_scraper(body: LoginRequest, tag: str, provider: SessionProvider) -> PortalScraper:
     log.info("%s: intento de autenticación | pensum_version=%d", tag, body.pensum_version)
-    scraper = PortalScraper(PortalSession(), pensum_version=body.pensum_version)
-    if not scraper.login(body.username, body.password):
-        log.warning("%s: autenticación fallida", tag)
-        raise HTTPException(
-            status_code=401, detail="Credenciales inválidas o sesión no establecida"
-        )
+    session = provider.open(PortalCredentials(body.username, SecretStr(body.password)))
     log.info("%s: autenticación exitosa", tag)
-    return scraper
+    return PortalScraper(session, pensum_version=body.pensum_version)
 
 
 @router.post("/login")
-def login_and_fetch(body: LoginRequest) -> AcademicRecord:
-    scraper = _login_scraper(body, "login")
-    return _build_record(scraper, body.pensum_version, "login")
+def login_and_fetch(
+    body: LoginRequest, provider: SessionProvider = Depends(get_session_provider)
+) -> AcademicRecord:
+    scraper = _login_scraper(body, "login", provider)
+    try:
+        return _build_record(scraper, body.pensum_version, "login")
+    finally:
+        scraper.logout()
 
 
 @router.post("/login/stream")
-def login_and_stream(body: LoginRequest):
-    scraper = _login_scraper(body, "login/stream")
+def login_and_stream(body: LoginRequest, provider: SessionProvider = Depends(get_session_provider)):
+    scraper = _login_scraper(body, "login/stream", provider)
     return StreamingResponse(
         _stream_record(scraper, body.pensum_version, "login/stream"),
         media_type="application/x-ndjson",
