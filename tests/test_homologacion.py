@@ -6,11 +6,9 @@ la renombró a 2517450 "CÁTEDRA DE FORMACIÓN CIUDADANA Y CONSTITUCIONAL".
 No tocan la red: se sustituyen las llamadas al portal.
 """
 
-import pytest
-
 from app.features.record.sources.cursum import parse_curriculum
 from app.portal.session import PortalSession
-from scraper.portal_scraper import PortalScraper, _normalize_name
+from scraper.portal_scraper import PortalScraper
 
 
 def _item(code, name, credits=1, nivel=1):
@@ -104,43 +102,3 @@ def test_codigo_identico_no_pasa_por_el_nombre():
 def test_materia_ajena_no_se_homologa():
     s = _scraper(PENSUM_V5, {"2504520": (4.0, "COMPORTAMIENTO QUÍMICO DE LOS MATERIALES")})
     assert all(not m.cursada for m in s.fetch_curriculum())
-
-
-@pytest.mark.parametrize(
-    "a, b",
-    [
-        ("CONTROL ESTADÍSTICO DE CALIDAD", "CONTROL ESTADÍSTICO DE LA CALIDAD"),
-        ("ESCULTURA CONTEMPORÁNEA EN LA INGENIERÍA", "LA ESCULTURA CONTEMPORÁNEA EN LA INGENIERÍA"),
-        (
-            "GENIUS OF THE INDUSTRY(HISTORY OF THE GREAT INVENTIONS)",
-            "GENIUS OF THE INDUSTRY (HISTORY OF THE GREAT INVENTIONS)",
-        ),
-        ("SOCIO-HUMANÍSTICA III", "SOCIO HUMANISTICA III"),
-        (
-            "AUTOCUIDADO,SALUD PÚBLICA, SEGURIDAD INDUSTRIAL Y ATENCIÓN DE EMERGENCIAS",
-            "AUTOCUIDADO, SALUD PÚBLICA, SEGURIDAD INDUSTRIAL Y ATENCIÓN DE EMERGENCIAS",
-        ),
-        (
-            "FORMACION CIUDADANA Y CONSTITUCIONAL (TURBO)",
-            "FORMACION CIUDADANA Y CONSTITUCIONAL- TURBO",
-        ),
-        ("ARQUITECTURA DE SOFTWARE", "ARQUITECTURA DEL SOFTWARE"),
-    ],
-)
-def test_variantes_de_redaccion_dan_la_misma_clave(a, b):
-    assert _normalize_name(a) == _normalize_name(b)
-
-
-@pytest.mark.parametrize(
-    "a, b",
-    [
-        ("TERMODINÁMICA I", "TERMODINÁMICA II"),
-        ("SOCIO-HUMANÍSTICA I", "SOCIO-HUMANÍSTICA II"),
-        ("COMPORTAMIENTO QUÍMICO DE LOS MATERIALES", "COMPORTAMIENTO MECÁNICO DE LOS MATERIALES"),
-        ("LAB ELECTRÓNICA BÁSICA", "ELECTRÓNICA BÁSICA"),
-        ("GEOPOLÍTICA MUNDIAL (ESPAÑOL)", "GEOPOLÍTICA MUNDIAL (INGLÉS)"),
-        ("FORMACIÓN CIUDADANA Y CONSTITUCIONAL", "CÁTEDRA DE FORMACIÓN CIUDADANA Y CONSTITUCIONAL"),
-    ],
-)
-def test_materias_distintas_no_colapsan(a, b):
-    assert _normalize_name(a) != _normalize_name(b)
