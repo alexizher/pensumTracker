@@ -45,3 +45,10 @@ def test_urls_del_portal_por_defecto():
 def test_url_del_portal_desde_el_entorno(monkeypatch):
     monkeypatch.setenv("TSONE_URL", "https://tsone.example")
     assert Settings(_env_file=None).tsone_url == "https://tsone.example"
+
+
+def test_urls_del_portal_sin_barra_final(monkeypatch):
+    monkeypatch.setenv("TSONE_URL", "https://tsone.example/")
+    s = Settings(_env_file=None, cursum_url="https://cursum.example/x/")
+    assert s.tsone_url == "https://tsone.example"
+    assert s.cursum_url == "https://cursum.example/x"

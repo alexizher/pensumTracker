@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     ayudame2_url: str = "https://ayudame2.udea.edu.co"
     cursum_url: str = "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria"
 
+    @field_validator("tsone_url", "ayudame2_url", "cursum_url")
+    @classmethod
+    def _sin_barra_final(cls, value: str) -> str:
+        return value.rstrip("/")
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _limpiar_origenes(cls, value: Any) -> Any:
