@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -6,6 +7,8 @@ from pydantic import SecretStr
 from app.core.errors import InvalidCredentials
 from app.portal import auth
 from app.portal.session import PortalSession
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class LoginPerRequest:
             raise
         if not ok:
             session.close()
+            log.warning("login: credenciales rechazadas")
             raise InvalidCredentials()
         session.credentials = credentials
         return session

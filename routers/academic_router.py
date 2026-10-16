@@ -3,10 +3,10 @@ import logging
 from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, SecretStr
 
 from app.core.errors import PortalError, error_payload
+from app.core.streaming import ClosingStreamingResponse
 from app.portal.credentials import PortalCredentials, SessionProvider, get_session_provider
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
@@ -232,11 +232,16 @@ def login_and_fetch(
 @router.post("/login/stream")
 def login_and_stream(body: LoginRequest, provider: SessionProvider = Depends(get_session_provider)):
     scraper = _login_scraper(body, "login/stream", provider)
-    return StreamingResponse(
-        _stream_record(scraper, body.pensum_version, "login/stream"),
-        media_type="application/x-ndjson",
-        headers=_STREAM_HEADERS,
-    )
+    try:
+        return ClosingStreamingResponse(
+            _stream_record(scraper, body.pensum_version, "login/stream"),
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
+            on_close=scraper.logout,
+        )
+    except BaseException:
+        scraper.logout()
+        raise
 
 
 @router.post("/academic-record")
@@ -250,11 +255,16 @@ def get_academic_record(body: SessionRequest) -> AcademicRecord:
 def stream_academic_record(body: SessionRequest):
     log.info("academic-record/stream: inicio | pensum_version=%d", body.pensum_version)
     scraper = get_scraper(body)
-    if not scraper.validate_session():
-        log.warning("academic-record/stream: sesión inválida o expirada")
-        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
-    return StreamingResponse(
-        _stream_record(scraper, body.pensum_version, "academic-record/stream"),
-        media_type="application/x-ndjson",
-        headers=_STREAM_HEADERS,
-    )
+    try:
+        if not scraper.validate_session():
+            log.warning("academic-record/stream: sesión inválida o expirada")
+            raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+        return ClosingStreamingResponse(
+            _stream_record(scraper, body.pensum_version, "academic-record/stream"),
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
+            on_close=scraper.logout,
+        )
+    except BaseException:
+        scraper.logout()
+        raise

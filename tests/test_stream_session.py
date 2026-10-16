@@ -2,11 +2,13 @@ import json
 from collections.abc import Generator, Iterator
 from typing import cast
 
+import anyio
 import pytest
 import requests
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from app.core.streaming import ClosingStreamingResponse
 from app.portal.credentials import (
     LoginPerRequest,
     PortalCredentials,
@@ -50,17 +52,6 @@ def test_stream_cierra_la_sesion(fake_portal: FakePortal, provider: RecordingPro
     assert session.credentials is None
 
 
-def test_stream_abandonado_cierra_la_sesion(fake_portal: FakePortal, provider: RecordingProvider):
-    # El TestClient de esta versión consume el cuerpo entero aunque se salga antes, así que
-    # este test no prueba el abandono. Lo prueba test_generador_cerrado_a_medias_cierra_la_sesion.
-    with TestClient(app) as client:
-        with client.stream("POST", URL, json=BODY) as response:
-            next(response.iter_lines())
-    (session,) = provider.sessions
-    assert session.closed is True
-    assert session.credentials is None
-
-
 def test_generador_cerrado_a_medias_cierra_la_sesion(fake_portal: FakePortal):
     credentials = PortalCredentials("usuario", SecretStr("clave"))
     session = LoginPerRequest().open(credentials)
@@ -92,3 +83,72 @@ def test_reauth_tardio_usa_la_clave_de_la_sesion(fake_portal: FakePortal):
     ]
     assert len(validar) == 2
     assert all(c.request.body == "clave=clave" for c in validar)
+
+
+def _scope() -> dict:
+    return {"type": "http", "asgi": {"version": "3.0"}, "method": "POST", "headers": []}
+
+
+async def _receive_forever():
+    await anyio.sleep_forever()
+    return {}
+
+
+def _response(session: PortalSession) -> ClosingStreamingResponse:
+    scraper = PortalScraper(session)
+    return ClosingStreamingResponse(
+        _stream_record(scraper, 0, "test"),
+        media_type="application/x-ndjson",
+        on_close=scraper.logout,
+    )
+
+
+def test_corte_del_cliente_tras_el_primer_chunk_cierra_la_sesion(fake_portal: FakePortal):
+    session = LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
+    sent: list[str] = []
+
+    async def send(message):
+        sent.append(message["type"])
+        if message["type"] == "http.response.body":
+            raise OSError("cliente desconectado")
+
+    async def run():
+        await _response(session)(_scope(), _receive_forever, send)
+
+    with pytest.raises(OSError):
+        anyio.run(run)
+    assert "http.response.body" in sent
+    assert session.closed is True
+    assert session.credentials is None
+
+
+def test_desconexion_por_receive_cierra_la_sesion(fake_portal: FakePortal):
+    session = LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    async def run():
+        await _response(session)(_scope(), receive, send)
+
+    anyio.run(run)
+    assert session.closed is True
+    assert session.credentials is None
+
+
+def test_respuesta_sin_iterar_cierra_la_sesion(fake_portal: FakePortal):
+    session = LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
+
+    async def send(message):
+        raise OSError("cliente desconectado")
+
+    async def run():
+        await _response(session)(_scope(), _receive_forever, send)
+
+    with pytest.raises(OSError):
+        anyio.run(run)
+    assert session.closed is True
+    assert session.credentials is None

@@ -126,7 +126,8 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         return valid
 
     def logout(self) -> None:
-        self._session.close()
+        if not self._session.closed:
+            self._session.close()
         self._session.cookies.clear()
         self._student_cache = None
         self._info_cache = None
