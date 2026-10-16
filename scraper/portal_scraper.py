@@ -272,7 +272,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         # Versión del pensum en la que el estudiante está matriculado para este programa.
         try:
             self._enrolled_version = int(option.get("data-version") or 0) or None
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             self._enrolled_version = None
         # El form2 NO se envía a su propio action (vacío): el JS (retorno.js) le
         # asigna como action la URL _retorno (la historia) y lo postea allí.
