@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     allowed_origins: Annotated[list[str], NoDecode] = []
     portal_connect_timeout: float = 5
     portal_read_timeout: float = 30
+    tsone_url: str = "https://tsone.udea.edu.co"
+    ayudame2_url: str = "https://ayudame2.udea.edu.co"
+    cursum_url: str = "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria"
+
+    @field_validator("tsone_url", "ayudame2_url", "cursum_url")
+    @classmethod
+    def _sin_barra_final(cls, value: str) -> str:
+        return value.rstrip("/")
 
     @field_validator("allowed_origins", mode="before")
     @classmethod

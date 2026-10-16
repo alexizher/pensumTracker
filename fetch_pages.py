@@ -5,6 +5,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from app.core.config import get_settings
 from app.portal.session import PortalSession
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -147,8 +148,11 @@ def main():
 
     # Página 1 — constancia
     print(SEP)
-    print(f"  [1] URL: {scraper._INFO_URL}?app=consultar")
-    resp = scraper._session.tsone_get(scraper._INFO_URL + "?app=consultar")
+    settings = get_settings()
+    info_url = settings.tsone_url + "/php_constancia_estudiante/"
+    historia_url = settings.tsone_url + "/php_historia_estudiante/"
+    print(f"  [1] URL: {info_url}?app=consultar")
+    resp = scraper._session.tsone_get(info_url + "?app=consultar")
     print(f"  Status: {resp.status_code}  |  Final URL: {resp.url}")
     save("1_constancia.html", resp.text)
     show_constancia(scraper)
@@ -156,10 +160,10 @@ def main():
 
     # Página 2 — historia
     print(SEP)
-    _, _, program_code = scraper.fetch_student_info()
-    print(f"  [2] URL: {scraper._HISTORIA_URL}?app=consultar")
-    soup = scraper._fetch_historia_soup(program_code)
-    save("2_historia.html", soup.prettify())
+    print(f"  [2] URL: {historia_url}?app=consultar")
+    resp = scraper._session.tsone_get(historia_url + "?app=consultar")
+    print(f"  Status: {resp.status_code}  |  Final URL: {resp.url}")
+    save("2_historia.html", resp.text)
     show_historia(scraper)
     pause()
 
@@ -206,7 +210,7 @@ def main():
             print(f"      name={h.get('name')!r}  value={h.get('value')!r}")
 
     print()
-    print("  — Simulando _fetch_historia_soup() con este response —")
+    print("  — Simulando PortalRecordSource.historia() con este response —")
     _, _, program_code = scraper.fetch_student_info()
     print(f"  program_code a seleccionar: {program_code!r}")
 
@@ -235,7 +239,7 @@ def main():
             save("4b_post_form2.html", post_resp.text)
 
             print("  GET historia después de la selección…")
-            hist_resp = scraper._session.tsone_get(scraper._HISTORIA_URL + "?app=consultar")
+            hist_resp = scraper._session.tsone_get(historia_url + "?app=consultar")
             print(f"  GET status={hist_resp.status_code}  url={hist_resp.url}")
             result_soup = BeautifulSoup(hist_resp.text, "lxml")
             semestres = result_soup.find_all(attrs={"data-semestre": True})
