@@ -32,5 +32,8 @@ jobs:
       - name: Mypy
         run: python -m mypy .
 
+      - name: Import linter
+        run: lint-imports
+
       - name: Pytest
         run: python -m pytest -q

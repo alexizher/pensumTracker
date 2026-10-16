@@ -1,14 +1,15 @@
 import logging
 import re
-import ssl
 import unicodedata
 
 import requests
 from bs4 import BeautifulSoup
-from fastapi import HTTPException
-from requests.adapters import HTTPAdapter
-from urllib3.util.ssl_ import create_urllib3_context
+from pydantic import SecretStr
 
+from app.core.errors import PortalFormatChanged
+from app.portal import auth
+from app.portal.credentials import PortalCredentials
+from app.portal.session import PortalSession
 from models.academic import Subject
 from scraper.base import AcademicHistoryFetcher, Authenticator, CurriculumFetcher
 
@@ -19,9 +20,6 @@ _PASSING_GRADE = 3.0
 # Notas textuales que indican materia aprobada sin nota numérica
 # (típico de materias de 0 créditos: Formación Ciudadana, validaciones, etc.).
 _PASSING_TEXT = {"APROBADA", "APROBADO", "VALIDADA", "VALIDADO", "SUFICIENTE", "CUMPLE"}
-
-# (connect timeout, read timeout) en segundos para todas las peticiones al portal UdeA.
-_TIMEOUT = (5, 30)
 
 
 def _parse_json(resp: requests.Response, context: str):
@@ -37,10 +35,7 @@ def _parse_json(resp: requests.Response, context: str):
             resp.url,
             resp.text[:200],
         )
-        raise HTTPException(
-            status_code=502,
-            detail="El portal de la UdeA no devolvió una respuesta válida",
-        )
+        raise PortalFormatChanged()
 
 
 # Palabras que el pensum agrega o quita entre versiones sin que cambie la
@@ -102,42 +97,15 @@ def _build_aliases(groups: tuple[tuple[str, ...], ...]) -> dict[str, tuple[str, 
 _NAME_ALIASES = _build_aliases(_NAME_EQUIVALENTS)
 
 
-class _LegacyTLSAdapter(HTTPAdapter):
-    def init_poolmanager(self, *args, **kwargs):
-        ctx = create_urllib3_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
-        ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
-        kwargs["ssl_context"] = ctx
-        super().init_poolmanager(*args, **kwargs)
-
-
 class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     _HISTORIA_URL = "https://tsone.udea.edu.co/php_historia_estudiante/"
     _INFO_URL = "https://tsone.udea.edu.co/php_constancia_estudiante/"
     _PENSUM_URL = "https://ayudame2.udea.edu.co/php_pensum_estudiante/"
     _CURSUM_URL = "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria/pensum"
 
-    def __init__(self, cookies: dict[str, str], pensum_version: int = 0):
-        self._session = requests.Session()
-        self._session.mount("https://", _LegacyTLSAdapter())
-        self._session.headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            }
-        )
-        for name, value in cookies.items():
-            if name in ("user_name", "udeasecure"):
-                self._session.cookies.set(name, value, domain=".udea.edu.co", path="/")
-            elif name == "phpsessid_ayudame2":
-                self._session.cookies.set(
-                    "PHPSESSID", value, domain="ayudame2.udea.edu.co", path="/"
-                )
+    def __init__(self, session: PortalSession, pensum_version: int = 0):
+        self._session = session
         self._pensum_version = pensum_version
-        self._udeasecure = cookies.get("udeasecure", "")
-        self._password: str | None = None
         self._student_cache: tuple[str, str, str] | None = None
         self._info_cache: BeautifulSoup | None = None
         self._cursum_cache: list[dict] | None = None
@@ -146,113 +114,28 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         self._enrolled_version: int | None = None
         self._bank_requirements_cache: tuple[int | None, dict[str, int]] | None = None
 
-    def _do_reauth(self, host: str, password: str) -> str | None:
-        relogin_base = f"https://{host}/php_relogin/"
-        reauth_end = f"https://{host}/php_libs/reauthenticate_end.php"
-
-        self._session.post(
-            relogin_base + "?app=ingreso",
-            data={"urlref": reauth_end},
-            allow_redirects=True,
-            timeout=_TIMEOUT,
-        )
-
-        resp = self._session.post(
-            relogin_base + "?app=validar",
-            data={"clave": password},
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "application/json, text/javascript, */*",
-            },
-            timeout=_TIMEOUT,
-        )
-        try:
-            data = resp.json()
-        except Exception:
-            return None
-
-        if data.get("error") or "hash" not in data:
-            return None
-
-        h = data["hash"]
-        self._udeasecure = h
-        self._session.cookies.set("udeasecure", h, domain=".udea.edu.co", path="/")
-
-        end_resp = self._session.get(
-            f"{reauth_end}?hash={h}", allow_redirects=True, timeout=_TIMEOUT
-        )
-        end_soup = BeautifulSoup(end_resp.text, "lxml")
-        auto_form = end_soup.find("form")
-        if auto_form:
-            action = auto_form.get("action", "")
-            if action:
-                final_resp = self._session.post(
-                    action, data={}, allow_redirects=True, timeout=_TIMEOUT
-                )
-                return final_resp.text
-        return None
+    @classmethod
+    def from_cookies(cls, cookies: dict[str, str], pensum_version: int = 0) -> "PortalScraper":
+        return cls(PortalSession.from_cookies(cookies), pensum_version)
 
     def login(self, username: str, password: str) -> bool:
-        log.info("login: SSO ayudame2")
-        sso = self._session.post(
-            "https://ayudame2.udea.edu.co/php_mua_externos/",
-            data={"usuario": username, "clave": password},
-            allow_redirects=True,
-            timeout=_TIMEOUT,
-        )
-        log.info("login: SSO status=%d final_url=%s", sso.status_code, sso.url)
-        if sso.status_code != 200:
-            log.warning("login: SSO falló con status=%d", sso.status_code)
-            return False
-        self._session.cookies.set("user_name", username, domain=".udea.edu.co", path="/")
-
-        self._session.get(
-            self._HISTORIA_URL + "?app=consultar", allow_redirects=True, timeout=_TIMEOUT
-        )
-        log.info("login: reauth tsone")
-        self._do_reauth("tsone.udea.edu.co", password)
-        if not self._udeasecure:
-            log.warning("login: reauth tsone falló, udeasecure vacío")
-            return False
-        log.info("login: reauth tsone ok | udeasecure presente=True")
-
-        # El pensum oficial (mínimos por banco) vive en ayudame2.
-        log.info("login: reauth ayudame2")
-        self._do_reauth("ayudame2.udea.edu.co", password)
-        self._password = password
-
-        resp = self._tsone_get(self._INFO_URL + "?app=consultar")
-        self._info_cache = BeautifulSoup(resp.text, "lxml")
-        log.info("login: constancia GET status=%d final_url=%s", resp.status_code, resp.url)
-
-        valid = self.validate_session()
-        log.info("login: validate_session=%s", valid)
+        credentials = PortalCredentials(username, SecretStr(password))
+        valid = auth.login(self._session, credentials)
+        if valid:
+            self._session.credentials = credentials
         return valid
 
     def logout(self) -> None:
+        if not self._session.closed:
+            self._session.close()
         self._session.cookies.clear()
-        self._udeasecure = ""
-        self._password = None
         self._student_cache = None
         self._info_cache = None
+        self._cursum_cache = None
         self._bank_requirements_cache = None
 
-    def _tsone_get(self, url: str) -> requests.Response:
-        if self._udeasecure:
-            self._session.cookies.set(
-                "udeasecure", self._udeasecure, domain=".udea.edu.co", path="/"
-            )
-        return self._session.get(url, allow_redirects=True, timeout=_TIMEOUT)
-
-    def _tsone_post(self, url: str, data: dict) -> requests.Response:
-        if self._udeasecure:
-            self._session.cookies.set(
-                "udeasecure", self._udeasecure, domain=".udea.edu.co", path="/"
-            )
-        return self._session.post(url, data=data, allow_redirects=True, timeout=_TIMEOUT)
-
     def _fetch_historia_soup(self, program_code: str) -> BeautifulSoup:
-        resp = self._tsone_get(self._HISTORIA_URL + "?app=consultar")
+        resp = self._session.tsone_get(self._HISTORIA_URL + "?app=consultar")
         soup = BeautifulSoup(resp.text, "lxml")
         if "php_programas_estudiante" not in resp.url:
             return soup
@@ -289,7 +172,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             "mas_programas": "SI",
             "api": "programasudea",
         }
-        post_resp = self._tsone_post(retorno, form_data)
+        post_resp = self._session.tsone_post(retorno, form_data)
         soup_after = BeautifulSoup(post_resp.text, "lxml")
         if "php_programas_estudiante" not in post_resp.url:
             n = len(soup_after.find_all(attrs={"data-semestre": True}))
@@ -301,7 +184,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             "_fetch_historia_soup: la selección de %s no se aplicó (sigue en el selector)",
             program_code,
         )
-        hist_resp = self._tsone_get(retorno)
+        hist_resp = self._session.tsone_get(retorno)
         return BeautifulSoup(hist_resp.text, "lxml")
 
     def fetch_enrolled_version(self, program_code: str) -> int | None:
@@ -335,19 +218,12 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
 
     def _fetch_info_soup(self) -> BeautifulSoup:
         if self._info_cache is None:
-            resp = self._tsone_get(self._INFO_URL + "?app=consultar")
+            resp = self._session.tsone_get(self._INFO_URL + "?app=consultar")
             self._info_cache = BeautifulSoup(resp.text, "lxml")
         return self._info_cache
 
     def validate_session(self) -> bool:
-        resp = self._tsone_get(self._HISTORIA_URL + "?app=consultar")
-        invalid = (
-            resp.status_code != 200
-            or "php_relogin" in resp.url
-            or "No hay usuario conectado" in resp.text
-            or "php_relogin" in resp.text
-        )
-        return not invalid
+        return auth.validate(self._session)
 
     def _parse_grade(self, raw: str) -> float | None:
         raw = raw.strip()
@@ -359,7 +235,9 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             return None
 
     def _fetch_semester_grades(self, sem_code: str) -> dict[str, tuple[float | None, str]]:
-        resp = self._tsone_get(self._HISTORIA_URL + f"?app=ver_semestre&semestre={sem_code}")
+        resp = self._session.tsone_get(
+            self._HISTORIA_URL + f"?app=ver_semestre&semestre={sem_code}"
+        )
         soup = BeautifulSoup(resp.text, "lxml")
         result: dict[str, tuple[float | None, str]] = {}
         for row in soup.select("table tr.text-center"):
@@ -438,7 +316,6 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         resp = self._session.get(
             "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria/programas",
             allow_redirects=True,
-            timeout=_TIMEOUT,
         )
         for p in _parse_json(resp, "fetch_program_info"):
             if str(p["codigo"]) == program_code:
@@ -462,15 +339,16 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         resp = self._session.get(
             self._PENSUM_URL + "?app=consultar",
             allow_redirects=True,
-            timeout=_TIMEOUT,
         )
-        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and self._password:
+        credentials = self._session.credentials
+        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and credentials:
             log.info("fetch_elective_bank_requirements: reauth ayudame2")
-            self._do_reauth("ayudame2.udea.edu.co", self._password)
+            auth.reauth(
+                self._session, "ayudame2.udea.edu.co", credentials.password.get_secret_value()
+            )
             resp = self._session.get(
                 self._PENSUM_URL + "?app=consultar",
                 allow_redirects=True,
-                timeout=_TIMEOUT,
             )
 
         if "php_relogin" in resp.url or "PÉNSUM DEL PROGRAMA" not in resp.text:
@@ -554,7 +432,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             return self._cursum_cache
         _, _, program_code = self.fetch_student_info()
         cursum_url = f"{self._CURSUM_URL}/{program_code}/{self._pensum_version}"
-        resp = self._session.get(cursum_url, allow_redirects=True, timeout=_TIMEOUT)
+        resp = self._session.get(cursum_url, allow_redirects=True)
         log.info("_fetch_cursum_items: cursum status=%d url=%s", resp.status_code, resp.url)
         items = _parse_json(resp, "fetch_curriculum")
         if not isinstance(items, list):

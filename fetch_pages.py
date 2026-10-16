@@ -5,6 +5,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from app.portal.session import PortalSession
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
 
@@ -137,7 +138,7 @@ def main():
     username = input("\n  Usuario: ").strip()
     password = getpass.getpass("  Contraseña: ")
 
-    scraper = PortalScraper(cookies={})
+    scraper = PortalScraper(PortalSession())
     print("\n  Autenticando…")
     if not scraper.login(username, password):
         print("  ✗ Login fallido.")
@@ -147,7 +148,7 @@ def main():
     # Página 1 — constancia
     print(SEP)
     print(f"  [1] URL: {scraper._INFO_URL}?app=consultar")
-    resp = scraper._tsone_get(scraper._INFO_URL + "?app=consultar")
+    resp = scraper._session.tsone_get(scraper._INFO_URL + "?app=consultar")
     print(f"  Status: {resp.status_code}  |  Final URL: {resp.url}")
     save("1_constancia.html", resp.text)
     show_constancia(scraper)
@@ -172,7 +173,7 @@ def main():
     print(SEP)
     print("  [4] Simulación selector de programas")
     print(f"  URL: {_PROGRAMAS_URL}")
-    resp = scraper._tsone_get(_PROGRAMAS_URL)
+    resp = scraper._session.tsone_get(_PROGRAMAS_URL)
     print(f"  Status: {resp.status_code}  |  Final URL: {resp.url}")
     save("4_programas.html", resp.text)
 
@@ -229,12 +230,12 @@ def main():
                 "api": "programasudea",
             }
             print(f"  Datos del POST a form2: {form_data}")
-            post_resp = scraper._tsone_post(action, form_data)
+            post_resp = scraper._session.tsone_post(action, form_data)
             print(f"  POST status={post_resp.status_code}  url={post_resp.url}")
             save("4b_post_form2.html", post_resp.text)
 
             print("  GET historia después de la selección…")
-            hist_resp = scraper._tsone_get(scraper._HISTORIA_URL + "?app=consultar")
+            hist_resp = scraper._session.tsone_get(scraper._HISTORIA_URL + "?app=consultar")
             print(f"  GET status={hist_resp.status_code}  url={hist_resp.url}")
             result_soup = BeautifulSoup(hist_resp.text, "lxml")
             semestres = result_soup.find_all(attrs={"data-semestre": True})

@@ -2,10 +2,12 @@ import json
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, SecretStr
 
+from app.core.errors import PortalError, error_payload
+from app.core.streaming import ClosingStreamingResponse
+from app.portal.credentials import PortalCredentials, SessionProvider, get_session_provider
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper
 from services.academic_service import AcademicRecordBuilder
@@ -29,7 +31,7 @@ class LoginRequest(BaseModel):
 
 
 def get_scraper(body: SessionRequest) -> PortalScraper:
-    return PortalScraper(cookies=body.cookies, pensum_version=body.pensum_version)
+    return PortalScraper.from_cookies(body.cookies, pensum_version=body.pensum_version)
 
 
 def _ndjson(stage: str, **payload) -> str:
@@ -44,10 +46,13 @@ def health_check():
 @router.post("/session")
 def validate_session(body: SessionRequest):
     scraper = get_scraper(body)
-    if not scraper.validate_session():
-        log.warning("validate_session: sesión inválida o expirada")
-        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
-    student_name, program_name, program_code = scraper.fetch_student_info()
+    try:
+        if not scraper.validate_session():
+            log.warning("validate_session: sesión inválida o expirada")
+            raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+        student_name, program_name, program_code = scraper.fetch_student_info()
+    finally:
+        scraper.logout()
     log.info("validate_session: ok | program_code=%s", program_code)
     return {
         "valid": True,
@@ -197,55 +202,80 @@ def _stream_record(
         log.warning("%s: error del portal durante el streaming: %s", tag, exc.detail)
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         yield _ndjson("error", status=exc.status_code, detail=detail)
-    except Exception:
-        log.exception("%s: error inesperado durante el streaming", tag)
-        yield _ndjson("error", status=500, detail="Error inesperado al obtener el pensum")
-
-
-def _login_scraper(body: LoginRequest, tag: str) -> PortalScraper:
-    log.info("%s: intento de autenticación | pensum_version=%d", tag, body.pensum_version)
-    scraper = PortalScraper(cookies={}, pensum_version=body.pensum_version)
-    if not scraper.login(body.username, body.password):
-        log.warning("%s: autenticación fallida", tag)
-        raise HTTPException(
-            status_code=401, detail="Credenciales inválidas o sesión no establecida"
+    except PortalError as exc:
+        log.warning(
+            "%s: error del portal durante el streaming: %s",
+            tag,
+            exc.detail,
+            exc_info=exc.__cause__ if exc.__cause__ is not None else False,
         )
+        status, detail = error_payload(exc)
+        yield _ndjson("error", status=status, detail=detail)
+    except Exception as exc:
+        log.exception("%s: error inesperado durante el streaming", tag)
+        status, detail = error_payload(exc)
+        yield _ndjson("error", status=status, detail=detail)
+    finally:
+        scraper.logout()
+
+
+def _login_scraper(body: LoginRequest, tag: str, provider: SessionProvider) -> PortalScraper:
+    log.info("%s: intento de autenticación | pensum_version=%d", tag, body.pensum_version)
+    session = provider.open(PortalCredentials(body.username, SecretStr(body.password)))
     log.info("%s: autenticación exitosa", tag)
-    return scraper
+    return PortalScraper(session, pensum_version=body.pensum_version)
 
 
 @router.post("/login")
-def login_and_fetch(body: LoginRequest) -> AcademicRecord:
-    scraper = _login_scraper(body, "login")
-    return _build_record(scraper, body.pensum_version, "login")
+def login_and_fetch(
+    body: LoginRequest, provider: SessionProvider = Depends(get_session_provider)
+) -> AcademicRecord:
+    scraper = _login_scraper(body, "login", provider)
+    try:
+        return _build_record(scraper, body.pensum_version, "login")
+    finally:
+        scraper.logout()
 
 
 @router.post("/login/stream")
-def login_and_stream(body: LoginRequest):
-    scraper = _login_scraper(body, "login/stream")
-    return StreamingResponse(
-        _stream_record(scraper, body.pensum_version, "login/stream"),
-        media_type="application/x-ndjson",
-        headers=_STREAM_HEADERS,
-    )
+def login_and_stream(body: LoginRequest, provider: SessionProvider = Depends(get_session_provider)):
+    scraper = _login_scraper(body, "login/stream", provider)
+    try:
+        return ClosingStreamingResponse(
+            _stream_record(scraper, body.pensum_version, "login/stream"),
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
+            on_close=scraper.logout,
+        )
+    except BaseException:
+        scraper.logout()
+        raise
 
 
 @router.post("/academic-record")
 def get_academic_record(body: SessionRequest) -> AcademicRecord:
     log.info("academic-record: inicio | pensum_version=%d", body.pensum_version)
     scraper = get_scraper(body)
-    return _build_record(scraper, body.pensum_version, "academic-record")
+    try:
+        return _build_record(scraper, body.pensum_version, "academic-record")
+    finally:
+        scraper.logout()
 
 
 @router.post("/academic-record/stream")
 def stream_academic_record(body: SessionRequest):
     log.info("academic-record/stream: inicio | pensum_version=%d", body.pensum_version)
     scraper = get_scraper(body)
-    if not scraper.validate_session():
-        log.warning("academic-record/stream: sesión inválida o expirada")
-        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
-    return StreamingResponse(
-        _stream_record(scraper, body.pensum_version, "academic-record/stream"),
-        media_type="application/x-ndjson",
-        headers=_STREAM_HEADERS,
-    )
+    try:
+        if not scraper.validate_session():
+            log.warning("academic-record/stream: sesión inválida o expirada")
+            raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+        return ClosingStreamingResponse(
+            _stream_record(scraper, body.pensum_version, "academic-record/stream"),
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
+            on_close=scraper.logout,
+        )
+    except BaseException:
+        scraper.logout()
+        raise
