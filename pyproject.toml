@@ -12,11 +12,6 @@ ignore_missing_imports = true
 exclude = ["^pages/", "^\\.venv/"]
 
 [[tool.mypy.overrides]]
-# Se quita en el PR 3, cuando los parsers salen del scraper.
-module = "scraper.portal_scraper"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
 module = "app.core.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

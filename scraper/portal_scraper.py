@@ -1,12 +1,12 @@
 import logging
 import re
 import unicodedata
+from typing import cast
 
-import requests
-from bs4 import BeautifulSoup
 from pydantic import SecretStr
 
-from app.core.errors import PortalFormatChanged
+from app.features.record.sources.gateway import PortalRecordSource
+from app.features.record.sources.models import CursumSubject, HistoriaPage
 from app.portal import auth
 from app.portal.credentials import PortalCredentials
 from app.portal.session import PortalSession
@@ -20,22 +20,6 @@ _PASSING_GRADE = 3.0
 # Notas textuales que indican materia aprobada sin nota numérica
 # (típico de materias de 0 créditos: Formación Ciudadana, validaciones, etc.).
 _PASSING_TEXT = {"APROBADA", "APROBADO", "VALIDADA", "VALIDADO", "SUFICIENTE", "CUMPLE"}
-
-
-def _parse_json(resp: requests.Response, context: str):
-    """Parsea la respuesta como JSON o lanza 502 si el portal devolvió otra cosa
-    (HTML de error, página de relogin, etc.)."""
-    try:
-        return resp.json()
-    except ValueError:
-        log.error(
-            "%s: respuesta no-JSON (status=%d url=%s): %r",
-            context,
-            resp.status_code,
-            resp.url,
-            resp.text[:200],
-        )
-        raise PortalFormatChanged()
 
 
 # Palabras que el pensum agrega o quita entre versiones sin que cambie la
@@ -98,21 +82,14 @@ _NAME_ALIASES = _build_aliases(_NAME_EQUIVALENTS)
 
 
 class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
-    _HISTORIA_URL = "https://tsone.udea.edu.co/php_historia_estudiante/"
-    _INFO_URL = "https://tsone.udea.edu.co/php_constancia_estudiante/"
-    _PENSUM_URL = "https://ayudame2.udea.edu.co/php_pensum_estudiante/"
-    _CURSUM_URL = "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria/pensum"
-
     def __init__(self, session: PortalSession, pensum_version: int = 0):
         self._session = session
+        self._source = PortalRecordSource(session)
         self._pensum_version = pensum_version
         self._student_cache: tuple[str, str, str] | None = None
-        self._info_cache: BeautifulSoup | None = None
-        self._cursum_cache: list[dict] | None = None
         # Versión del pensum en la que el estudiante está matriculado (del selector
         # de programas, atributo data-version). None si no se pudo determinar.
         self._enrolled_version: int | None = None
-        self._bank_requirements_cache: tuple[int | None, dict[str, int]] | None = None
 
     @classmethod
     def from_cookies(cls, cookies: dict[str, str], pensum_version: int = 0) -> "PortalScraper":
@@ -130,69 +107,21 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             self._session.close()
         self._session.cookies.clear()
         self._student_cache = None
-        self._info_cache = None
-        self._cursum_cache = None
-        self._bank_requirements_cache = None
+        # Los cachés de páginas viven en la fuente: se descartan con ella.
+        self._source = PortalRecordSource(self._session)
 
-    def _fetch_historia_soup(self, program_code: str) -> BeautifulSoup:
-        resp = self._session.tsone_get(self._HISTORIA_URL + "?app=consultar")
-        soup = BeautifulSoup(resp.text, "lxml")
-        if "php_programas_estudiante" not in resp.url:
-            return soup
-        log.info(
-            "_fetch_historia_soup: selector de programa detectado, seleccionando %s", program_code
-        )
-        option = soup.find("option", {"value": program_code})
-        if not option:
-            log.warning(
-                "_fetch_historia_soup: programa %s no encontrado en el selector", program_code
-            )
-            return soup
-        form2 = soup.find("form", {"id": "form2"})
-        if not form2:
-            log.warning("_fetch_historia_soup: form2 no encontrado")
-            return soup
-        # Versión del pensum en la que el estudiante está matriculado para este programa.
-        try:
-            self._enrolled_version = int(option.get("data-version") or 0) or None
-        except (TypeError, ValueError):
-            self._enrolled_version = None
-        # El form2 NO se envía a su propio action (vacío): el JS (retorno.js) le
-        # asigna como action la URL _retorno (la historia) y lo postea allí.
-        retorno = self._HISTORIA_URL + "?app=consultar"
-        form_data: dict[str, str] = {
-            "facultad": option.get("data-facultad", ""),
-            "nombre_facultad": option.get("data-nombre-facultad", ""),
-            "programa": program_code,
-            "nombre_programa": option.get_text(strip=True),
-            "maximo_semestre": option.get("data-maximo-semestre", ""),
-            "version": option.get("data-version", ""),
-            "estado": option.get("data-estado", ""),
-            "tipo": option.get("data-tipo", ""),
-            "mas_programas": "SI",
-            "api": "programasudea",
-        }
-        post_resp = self._session.tsone_post(retorno, form_data)
-        soup_after = BeautifulSoup(post_resp.text, "lxml")
-        if "php_programas_estudiante" not in post_resp.url:
-            n = len(soup_after.find_all(attrs={"data-semestre": True}))
-            log.info(
-                "_fetch_historia_soup: programa %s seleccionado | data-semestre=%d", program_code, n
-            )
-            return soup_after
-        log.warning(
-            "_fetch_historia_soup: la selección de %s no se aplicó (sigue en el selector)",
-            program_code,
-        )
-        hist_resp = self._session.tsone_get(retorno)
-        return BeautifulSoup(hist_resp.text, "lxml")
+    def _fetch_historia(self, program_code: str) -> HistoriaPage:
+        page = self._source.historia(program_code)
+        if page.selector is not None:
+            self._enrolled_version = page.selector.version
+        return page
 
     def fetch_enrolled_version(self, program_code: str) -> int | None:
         """Versión del pensum en la que el estudiante está matriculado para este
         programa, leída del selector de programas (data-version). Devuelve None
         si no hay selector (programa único) o no se pudo determinar."""
         if self._enrolled_version is None:
-            self._fetch_historia_soup(program_code)
+            self._fetch_historia(program_code)
         return self._enrolled_version
 
     def fetch_assigned_pensum_version(self, program_code: str) -> int | None:
@@ -216,12 +145,6 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         log.warning("fetch_assigned_pensum_version: no se pudo determinar")
         return None
 
-    def _fetch_info_soup(self) -> BeautifulSoup:
-        if self._info_cache is None:
-            resp = self._session.tsone_get(self._INFO_URL + "?app=consultar")
-            self._info_cache = BeautifulSoup(resp.text, "lxml")
-        return self._info_cache
-
     def validate_session(self) -> bool:
         return auth.validate(self._session)
 
@@ -235,37 +158,21 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
             return None
 
     def _fetch_semester_grades(self, sem_code: str) -> dict[str, tuple[float | None, str]]:
-        resp = self._session.tsone_get(
-            self._HISTORIA_URL + f"?app=ver_semestre&semestre={sem_code}"
-        )
-        soup = BeautifulSoup(resp.text, "lxml")
         result: dict[str, tuple[float | None, str]] = {}
-        for row in soup.select("table tr.text-center"):
-            cells = row.find_all("td")
-            if len(cells) < 3:
-                continue
-            raw = cells[0].get_text(strip=True)
-            match = re.match(r"\[(\w+)\]\s*(.*)", raw)
-            if not match:
-                continue
-            code = match.group(1)
-            name = match.group(2).strip()
-            raw_grade = cells[2].get_text(strip=True)
-            grade = self._parse_grade(raw_grade)
+        for row in self._source.semester_grades(sem_code):
+            grade = self._parse_grade(row.raw_grade)
             if grade is not None:
                 # Nota numérica: aprobada solo si alcanza el mínimo.
                 if grade >= _PASSING_GRADE:
-                    result[code] = (grade, name)
-            elif raw_grade.upper() in _PASSING_TEXT:
+                    result[row.code] = (grade, row.name)
+            elif row.raw_grade.upper() in _PASSING_TEXT:
                 # Aprobada sin nota numérica (p.ej. materias de 0 créditos).
-                result[code] = (None, name)
+                result[row.code] = (None, row.name)
         return result
 
     def _fetch_semester_codes(self) -> list[str]:
         _, _, program_code = self.fetch_student_info()
-        soup = self._fetch_historia_soup(program_code)
-        codes = [el.get("data-semestre") for el in soup.find_all(attrs={"data-semestre": True})]
-        return [c for c in codes if c]
+        return self._fetch_historia(program_code).semester_codes
 
     def _fetch_passed_with_names(self) -> dict[str, tuple[float | None, str]]:
         sem_codes = self._fetch_semester_codes()
@@ -282,49 +189,24 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     def fetch_student_info(self) -> tuple[str, str, str]:
         if self._student_cache:
             return self._student_cache
-        soup = self._fetch_info_soup()
-        text = soup.get_text(separator="\n")
-        name_m = re.search(r"Estudiante\s*[:\-]?\s*(.+)", text)
-        prog_m = re.search(r"Programa\s*[:\-]?\s*\[(\d+)\]\s+(.+)", text)
-        student_name = name_m.group(1).strip().lstrip(":").strip() if name_m else ""
-        program_code = prog_m.group(1).strip() if prog_m else ""
-        program_name = prog_m.group(2).strip() if prog_m else ""
-        log.info(
-            "fetch_student_info: has_name=%s has_program=%s program_code=%s",
-            bool(student_name),
-            bool(program_code),
-            program_code,
-        )
-        self._student_cache = (student_name, program_name, program_code)
+        info = self._source.student_info()
+        self._student_cache = (info.student_name, info.program_name, info.program_code)
         return self._student_cache
 
     def fetch_current_subjects(self) -> list[str]:
-        soup = self._fetch_info_soup()
-        h5 = soup.find("h5", string=re.compile(r"MATERIAS MATRICULADAS", re.IGNORECASE))
-        if not h5:
-            log.warning("fetch_current_subjects: no se encontró h5 'MATERIAS MATRICULADAS'")
-            return []
-        codes: list[str] = []
-        for div in h5.find_all_next("div", class_="alert-success"):
-            code_m = re.search(r"CÓDIGO\s*[:\-]?\s*(\d+)", div.get_text(), re.IGNORECASE)
-            if code_m:
-                codes.append(code_m.group(1))
-        log.info("fetch_current_subjects: %d materias en curso", len(codes))
-        return codes
+        return self._source.current_subject_codes()
 
     def fetch_program_info(self, program_code: str) -> tuple[int, list[int], int]:
-        resp = self._session.get(
-            "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria/programas",
-            allow_redirects=True,
+        program = self._source.program(program_code)
+        if program is None:
+            return 0, [], 0
+        # Cursum puede mandar null en versionActual o creditosGrado y hoy pasa tal cual.
+        # La firma se conserva para el router; el PR 4 decide qué hacer con el null.
+        return (
+            cast(int, program.version_actual),
+            program.versiones,
+            cast(int, program.total_credits),
         )
-        for p in _parse_json(resp, "fetch_program_info"):
-            if str(p["codigo"]) == program_code:
-                version_actual = p.get("versionActual", 0)
-                raw = p.get("versiones", "")
-                versiones = [int(v) for v in raw.split(",") if v.strip().isdigit()]
-                total_credits = p.get("creditosGrado", 0)
-                return version_actual, versiones, total_credits
-        return 0, [], 0
 
     def fetch_elective_bank_requirements(self) -> tuple[int | None, dict[str, int]]:
         """Lee del pensum oficial (ayudame2) los mínimos por banco y la versión
@@ -333,63 +215,10 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         Returns:
             (pensum_version_en_página | None, {nombre_banco: créditos_mínimos})
         """
-        if self._bank_requirements_cache is not None:
-            return self._bank_requirements_cache
-
-        resp = self._session.get(
-            self._PENSUM_URL + "?app=consultar",
-            allow_redirects=True,
-        )
-        credentials = self._session.credentials
-        if ("php_relogin" in resp.url or "php_relogin" in resp.text) and credentials:
-            log.info("fetch_elective_bank_requirements: reauth ayudame2")
-            auth.reauth(
-                self._session, "ayudame2.udea.edu.co", credentials.password.get_secret_value()
-            )
-            resp = self._session.get(
-                self._PENSUM_URL + "?app=consultar",
-                allow_redirects=True,
-            )
-
-        if "php_relogin" in resp.url or "PÉNSUM DEL PROGRAMA" not in resp.text:
-            log.warning(
-                "fetch_elective_bank_requirements: no se pudo leer el pensum | url=%s",
-                resp.url,
-            )
-            self._bank_requirements_cache = (None, {})
-            return self._bank_requirements_cache
-
-        soup = BeautifulSoup(resp.text, "lxml")
-        text = soup.get_text("\n", strip=True)
-
-        version: int | None = None
-        version_m = re.search(
-            r"Programa\s*:\s*\[[^\]]+\].*?\(v\s*(\d+)\)",
-            text,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if version_m:
-            version = int(version_m.group(1))
-
-        requirements: dict[str, int] = {}
-        # Bloques: "NOMBRE BANCO (N materias)" + "Debes cursar al menos X créditos"
-        for m in re.finditer(
-            r"([A-ZÁÉÍÓÚÜÑ0-9][A-ZÁÉÍÓÚÜÑ0-9 ,./()+-]*?)\s*\(\d+\s+materias\)\s*"
-            r"Debes cursar al menos\s+(\d+)\s+cr[eé]ditos",
-            text,
-            re.IGNORECASE,
-        ):
-            name = " ".join(m.group(1).split())
-            requirements[name] = int(m.group(2))
-
-        log.info(
-            "fetch_elective_bank_requirements: version=%s bancos=%s total_electivas=%d",
-            version,
-            requirements,
-            sum(requirements.values()),
-        )
-        self._bank_requirements_cache = (version, requirements)
-        return self._bank_requirements_cache
+        pensum = self._source.official_pensum()
+        if pensum is None:
+            return None, {}
+        return pensum.version, pensum.bank_minimums
 
     def resolve_total_credits(
         self,
@@ -427,42 +256,22 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         )
         return catalog_total, {}
 
-    def _fetch_cursum_items(self) -> list[dict]:
-        if self._cursum_cache is not None:
-            return self._cursum_cache
+    def _fetch_cursum_items(self) -> list[CursumSubject]:
         _, _, program_code = self.fetch_student_info()
-        cursum_url = f"{self._CURSUM_URL}/{program_code}/{self._pensum_version}"
-        resp = self._session.get(cursum_url, allow_redirects=True)
-        log.info("_fetch_cursum_items: cursum status=%d url=%s", resp.status_code, resp.url)
-        items = _parse_json(resp, "fetch_curriculum")
-        if not isinstance(items, list):
-            log.error(
-                "_fetch_cursum_items: cursum no devolvió lista, tipo=%s contenido=%r",
-                type(items).__name__,
-                str(items)[:200],
-            )
-            items = []
-        log.info("_fetch_cursum_items: cursum devolvió %d materias", len(items))
-        self._cursum_cache = items
-        return items
+        return self._source.curriculum(program_code, self._pensum_version)
 
     def _build_subject(
-        self, item: dict, cursada: bool, nota: float | None, cursando: bool
+        self, item: CursumSubject, cursada: bool, nota: float | None, cursando: bool
     ) -> Subject:
-        reqs = item.get("requisitos", [])
         return Subject(
-            code=str(item["materia"]),
-            name=item["nombreMateria"],
-            credits=item["creditos"],
-            semester=item["nivel"],
-            obligatoria=item.get("tipoMateria", "OBLIGATORIA") == "OBLIGATORIA",
-            elective_bank=item.get("nombreBancoElectiva", "").strip() or None,
-            prerequisites=[
-                str(r["materiaRequisito"]) for r in reqs if r["tipoRequisito"] == "PRERREQ"
-            ],
-            corequisites=[
-                str(r["materiaRequisito"]) for r in reqs if r["tipoRequisito"] == "CORREQ"
-            ],
+            code=item.code,
+            name=item.name,
+            credits=item.credits,
+            semester=item.level,
+            obligatoria=item.obligatoria,
+            elective_bank=item.elective_bank,
+            prerequisites=list(item.prerequisites),
+            corequisites=list(item.corequisites),
             cursada=cursada,
             nota=nota,
             cursando=cursando,
@@ -489,10 +298,8 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         if not cursum_items:
             return []
 
-        cursum_codes = {str(item["materia"]) for item in cursum_items}
-        name_to_code = {
-            _normalize_name(item["nombreMateria"]): str(item["materia"]) for item in cursum_items
-        }
+        cursum_codes = {item.code for item in cursum_items}
+        name_to_code = {_normalize_name(item.name): item.code for item in cursum_items}
         homologation: dict[str, float | None] = {}
         for old_code, (grade, name) in passed_with_names.items():
             if old_code in cursum_codes:
@@ -513,7 +320,7 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
 
         subjects: list[Subject] = []
         for item in cursum_items:
-            code = str(item["materia"])
+            code = item.code
             is_cursada = code in passed or code in homologation
             nota = passed.get(code) or homologation.get(code)
             subjects.append(self._build_subject(item, is_cursada, nota, code in current))

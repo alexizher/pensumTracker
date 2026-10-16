@@ -19,6 +19,13 @@ class ProgramOption(_Frozen):
     form_data: dict[str, str]
 
 
+class HistoriaPage(_Frozen):
+    """Historia académica ya resuelta: semestres y la opción elegida en el selector."""
+
+    semester_codes: list[str]
+    selector: ProgramOption | None
+
+
 class GradeRow(_Frozen):
     """Fila de un semestre, sin interpretar la nota."""
 
