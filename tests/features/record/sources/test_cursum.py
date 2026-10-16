@@ -38,3 +38,22 @@ def test_parse_curriculum_sin_creditos_lanza_keyerror():
     item = {"materia": 1, "nombreMateria": "A", "nivel": 1}
     with pytest.raises(KeyError):
         parse_curriculum([item])
+
+
+def test_parse_program_conserva_nulos_explicitos():
+    programs = [{"codigo": "506", "versionActual": None, "creditosGrado": None}]
+    result = parse_program(programs, "506")
+    assert result is not None
+    assert result.version_actual is None
+    assert result.total_credits is None
+    assert result.versiones == []
+
+
+def test_parse_program_claves_ausentes_dan_cero():
+    result = parse_program([{"codigo": "506"}], "506")
+    assert result == CursumProgram(code="506", version_actual=0, versiones=[], total_credits=0)
+
+
+def test_parse_program_versiones_ignora_vacios_y_no_numericos():
+    assert parse_program([{"codigo": "1", "versiones": "3,,x,5"}], "1").versiones == [3, 5]  # type: ignore[union-attr]
+    assert parse_program([{"codigo": "1", "versiones": ""}], "1").versiones == []  # type: ignore[union-attr]

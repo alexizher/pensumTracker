@@ -1,6 +1,7 @@
 """Parsers puros de los JSON de Cursum (programas y plan de estudios)."""
 
 import logging
+from typing import Any, cast
 
 from app.features.record.sources.models import CursumProgram, CursumSubject
 
@@ -8,7 +9,7 @@ log = logging.getLogger(__name__)
 
 
 def parse_program(programs: object, program_code: str) -> CursumProgram | None:
-    for p in programs:  # type: ignore[attr-defined]
+    for p in cast(list[dict[str, Any]], programs):
         if str(p["codigo"]) == program_code:
             raw = p.get("versiones", "")
             return CursumProgram(

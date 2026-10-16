@@ -34,9 +34,9 @@ class OfficialPensum(_Frozen):
 
 class CursumProgram(_Frozen):
     code: str
-    version_actual: int
+    version_actual: int | None
     versiones: list[int]
-    total_credits: int
+    total_credits: int | None
 
 
 class CursumSubject(_Frozen):
