@@ -1,0 +1,4 @@
+{
+  "status": 401,
+  "body": "{\"detail\":\"Credenciales inválidas o sesión no establecida\"}"
+}
