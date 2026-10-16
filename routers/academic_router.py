@@ -46,10 +46,13 @@ def health_check():
 @router.post("/session")
 def validate_session(body: SessionRequest):
     scraper = get_scraper(body)
-    if not scraper.validate_session():
-        log.warning("validate_session: sesión inválida o expirada")
-        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
-    student_name, program_name, program_code = scraper.fetch_student_info()
+    try:
+        if not scraper.validate_session():
+            log.warning("validate_session: sesión inválida o expirada")
+            raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+        student_name, program_name, program_code = scraper.fetch_student_info()
+    finally:
+        scraper.logout()
     log.info("validate_session: ok | program_code=%s", program_code)
     return {
         "valid": True,
@@ -200,7 +203,12 @@ def _stream_record(
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         yield _ndjson("error", status=exc.status_code, detail=detail)
     except PortalError as exc:
-        log.warning("%s: error del portal durante el streaming: %s", tag, exc.detail)
+        log.warning(
+            "%s: error del portal durante el streaming: %s",
+            tag,
+            exc.detail,
+            exc_info=exc.__cause__ if exc.__cause__ is not None else False,
+        )
         status, detail = error_payload(exc)
         yield _ndjson("error", status=status, detail=detail)
     except Exception as exc:
@@ -248,7 +256,10 @@ def login_and_stream(body: LoginRequest, provider: SessionProvider = Depends(get
 def get_academic_record(body: SessionRequest) -> AcademicRecord:
     log.info("academic-record: inicio | pensum_version=%d", body.pensum_version)
     scraper = get_scraper(body)
-    return _build_record(scraper, body.pensum_version, "academic-record")
+    try:
+        return _build_record(scraper, body.pensum_version, "academic-record")
+    finally:
+        scraper.logout()
 
 
 @router.post("/academic-record/stream")

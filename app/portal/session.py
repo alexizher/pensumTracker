@@ -66,6 +66,7 @@ class PortalSession(requests.Session):
         self._legacy_adapter.close()
         self.credentials = None
         self.udeasecure = ""
+        self.cookies.clear()
         self.closed = True
 
     @classmethod

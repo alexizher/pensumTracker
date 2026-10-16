@@ -7,3 +7,4 @@ types-requests
 httpx2>=2.0
 responses>=0.25
 import-linter>=2.1
+anyio

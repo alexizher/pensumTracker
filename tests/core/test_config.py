@@ -14,7 +14,7 @@ def test_sin_origenes_extra(monkeypatch):
     assert Settings(_env_file=None).allowed_origins == []
 
 
-def test_timeouts_por_defecto(monkeypatch):
+def test_timeouts_por_defecto():
     s = Settings(_env_file=None)
     assert (s.portal_connect_timeout, s.portal_read_timeout) == (5, 30)
 
