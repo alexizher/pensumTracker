@@ -16,6 +16,31 @@ exclude = ["^pages/", "^\\.venv/"]
 module = "scraper.portal_scraper"
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = "app.core.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+
+[tool.importlinter]
+root_packages = ["app"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "core y portal no importan features"
+type = "forbidden"
+source_modules = ["app.core", "app.portal"]
+forbidden_modules = ["app.features"]
+
+[[tool.importlinter.contracts]]
+name = "portal no importa fastapi ni starlette"
+type = "forbidden"
+source_modules = ["app.portal"]
+forbidden_modules = ["fastapi", "starlette"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
