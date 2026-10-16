@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import DEFAULT_ORIGINS, Settings, get_settings
-from app.core.errors import register_error_handlers
+from app.core.http_errors import register_error_handlers
 from app.core.logging import configure_logging
 from routers.academic_router import router
 

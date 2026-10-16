@@ -1,8 +1,5 @@
 from typing import ClassVar
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-
 GENERIC_DETAIL = "Error inesperado al obtener el pensum"
 
 
@@ -29,13 +26,3 @@ def error_payload(exc: BaseException) -> tuple[int, str]:
     if isinstance(exc, PortalError):
         return exc.status_code, exc.detail
     return 500, GENERIC_DETAIL
-
-
-async def _handle_portal_error(request: Request, exc: Exception) -> JSONResponse:
-    status, detail = error_payload(exc)
-    return JSONResponse({"detail": detail}, status_code=status)
-
-
-def register_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(InvalidCredentials, _handle_portal_error)
-    app.add_exception_handler(PortalFormatChanged, _handle_portal_error)
