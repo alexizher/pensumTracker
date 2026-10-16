@@ -55,5 +55,9 @@ def test_parse_program_claves_ausentes_dan_cero():
 
 
 def test_parse_program_versiones_ignora_vacios_y_no_numericos():
-    assert parse_program([{"codigo": "1", "versiones": "3,,x,5"}], "1").versiones == [3, 5]  # type: ignore[union-attr]
-    assert parse_program([{"codigo": "1", "versiones": ""}], "1").versiones == []  # type: ignore[union-attr]
+    result = parse_program([{"codigo": "1", "versiones": "3,,x,5"}], "1")
+    assert result is not None
+    assert result.versiones == [3, 5]
+    result = parse_program([{"codigo": "1", "versiones": ""}], "1")
+    assert result is not None
+    assert result.versiones == []

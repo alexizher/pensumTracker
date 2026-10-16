@@ -61,3 +61,8 @@ def test_filas_incompletas_se_descartan_y_punto_inicial_llega_intacto() -> None:
         "</table>"
     )
     assert parse_semester_grades(html) == [GradeRow(code="2", name="B", raw_grade=".5")]
+
+
+def test_parse_semester_codes_ignora_data_semestre_vacio():
+    html = '<a data-semestre="">x</a><a data-semestre="20241">y</a>'
+    assert parse_semester_codes(html) == ["20241"]
