@@ -33,6 +33,7 @@ class PortalSession(requests.Session):
             return self._legacy_adapter
         return super().get_adapter(url)
 
+    # Firma genérica a propósito: solo se añaden el timeout por defecto y la traducción de errores.
     def request(self, *args: Any, **kwargs: Any) -> requests.Response:  # type: ignore[override]
         if kwargs.get("timeout") is None:
             kwargs["timeout"] = self._timeout
@@ -60,6 +61,7 @@ class PortalSession(requests.Session):
 
     def close(self) -> None:
         super().close()
+        self._legacy_adapter.close()
         self.credentials = None
         self.udeasecure = ""
         self.closed = True

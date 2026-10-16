@@ -33,9 +33,13 @@ def test_tsone_get_envia_udeasecure():
 
 def test_close_borra_estado():
     s = PortalSession()
-    s.credentials = object()  # type: ignore[assignment]
+    s.credentials = object()
     s.set_udeasecure("h")
+    pool = s._legacy_adapter.poolmanager
+    pool.connection_from_url("https://tsone.udea.edu.co/")
+    assert len(pool.pools) == 1
     s.close()
+    assert len(pool.pools) == 0
     assert s.credentials is None
     assert s.udeasecure == ""
     assert s.closed is True
