@@ -4,5 +4,5 @@ pytest>=8.0.0
 ruff==0.17.1
 mypy==2.4.0
 types-requests
-httpx>=0.28
+httpx2>=2.0
 responses>=0.25
