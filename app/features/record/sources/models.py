@@ -20,10 +20,11 @@ class ProgramOption(_Frozen):
 
 
 class HistoriaPage(_Frozen):
-    """Historia académica ya resuelta: semestres y la opción elegida en el selector."""
+    """Historia académica ya resuelta: semestres y la versión del selector, si se aplicó."""
 
     semester_codes: list[str]
-    selector: ProgramOption | None
+    selector_applied: bool
+    enrolled_version: int | None
 
 
 class GradeRow(_Frozen):

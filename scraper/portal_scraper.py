@@ -5,7 +5,7 @@ from typing import cast
 
 from pydantic import SecretStr
 
-from app.features.record.sources.gateway import PortalRecordSource
+from app.features.record.sources.gateway import PortalRecordSource, RecordSource
 from app.features.record.sources.models import CursumSubject, HistoriaPage
 from app.portal import auth
 from app.portal.credentials import PortalCredentials
@@ -84,7 +84,7 @@ _NAME_ALIASES = _build_aliases(_NAME_EQUIVALENTS)
 class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
     def __init__(self, session: PortalSession, pensum_version: int = 0):
         self._session = session
-        self._source = PortalRecordSource(session)
+        self._source: RecordSource = PortalRecordSource(session)
         self._pensum_version = pensum_version
         self._student_cache: tuple[str, str, str] | None = None
         # Versión del pensum en la que el estudiante está matriculado (del selector
@@ -112,8 +112,8 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
 
     def _fetch_historia(self, program_code: str) -> HistoriaPage:
         page = self._source.historia(program_code)
-        if page.selector is not None:
-            self._enrolled_version = page.selector.version
+        if page.selector_applied:
+            self._enrolled_version = page.enrolled_version
         return page
 
     def fetch_enrolled_version(self, program_code: str) -> int | None:

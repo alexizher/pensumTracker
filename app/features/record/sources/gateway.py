@@ -89,13 +89,17 @@ class PortalRecordSource:
         resp = self._session.tsone_get(retorno)
         if _SELECTOR_PATH not in resp.url:
             return HistoriaPage(
-                semester_codes=historia.parse_semester_codes(resp.text), selector=None
+                semester_codes=historia.parse_semester_codes(resp.text),
+                selector_applied=False,
+                enrolled_version=None,
             )
         log.info("historia: selector de programa detectado, seleccionando %s", program_code)
         option = historia.parse_program_selector(resp.text, program_code)
         if option is None:
             return HistoriaPage(
-                semester_codes=historia.parse_semester_codes(resp.text), selector=None
+                semester_codes=historia.parse_semester_codes(resp.text),
+                selector_applied=False,
+                enrolled_version=None,
             )
         # El form2 NO se envía a su propio action (vacío): el JS (retorno.js) le
         # asigna como action la URL _retorno (la historia) y lo postea allí.
@@ -105,13 +109,17 @@ class PortalRecordSource:
             log.info(
                 "historia: programa %s seleccionado | data-semestre=%d", program_code, len(codes)
             )
-            return HistoriaPage(semester_codes=codes, selector=option)
+            return HistoriaPage(
+                semester_codes=codes, selector_applied=True, enrolled_version=option.version
+            )
         log.warning(
             "historia: la selección de %s no se aplicó (sigue en el selector)", program_code
         )
         hist_resp = self._session.tsone_get(retorno)
         return HistoriaPage(
-            semester_codes=historia.parse_semester_codes(hist_resp.text), selector=option
+            semester_codes=historia.parse_semester_codes(hist_resp.text),
+            selector_applied=True,
+            enrolled_version=option.version,
         )
 
     def semester_grades(self, semester_code: str) -> list[GradeRow]:
@@ -156,6 +164,8 @@ class PortalRecordSource:
             log.info("curriculum: cursum devolvió %d materias", len(items))
             subjects = cursum.parse_curriculum(items)
         else:
+            # Misma llamada en ambas ramas: el log del recuento debe salir después
+            # del que emite parse_curriculum, como antes de extraer el parser.
             subjects = cursum.parse_curriculum(items)
             log.info("curriculum: cursum devolvió %d materias", 0)
         self._curriculum[key] = subjects
