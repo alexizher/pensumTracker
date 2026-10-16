@@ -3,6 +3,7 @@ from typing import cast
 
 from pydantic import SecretStr
 
+from app.features.record.domain.credits import resolve_total_credits
 from app.features.record.domain.grades import PassedSubject, merge_passed, passed_subject
 from app.features.record.domain.homologation import homologate
 from app.features.record.sources.gateway import PortalRecordSource, RecordSource
@@ -152,29 +153,9 @@ class PortalScraper(Authenticator, CurriculumFetcher, AcademicHistoryFetcher):
         Si no, cae a creditosGrado del catálogo Cursum.
         """
         page_version, bank_reqs = self.fetch_elective_bank_requirements()
-        oblig = sum(s.credits for s in subjects if s.obligatoria)
-
-        if bank_reqs and page_version == self._pensum_version:
-            total = oblig + sum(bank_reqs.values())
-            log.info(
-                "resolve_total_credits: versión=%d oblig=%d electivas_min=%d -> %d "
-                "(catálogo cursum=%d)",
-                self._pensum_version,
-                oblig,
-                sum(bank_reqs.values()),
-                total,
-                catalog_total,
-            )
-            return total, bank_reqs
-
-        log.info(
-            "resolve_total_credits: fallback cursum=%d | page_version=%s efectiva=%d bancos=%d",
-            catalog_total,
-            page_version,
-            self._pensum_version,
-            len(bank_reqs),
+        return resolve_total_credits(
+            catalog_total, subjects, page_version, bank_reqs, self._pensum_version
         )
-        return catalog_total, {}
 
     def _fetch_cursum_items(self) -> list[CursumSubject]:
         _, _, program_code = self.fetch_student_info()
