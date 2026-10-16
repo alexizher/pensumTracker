@@ -33,3 +33,15 @@ def test_create_app_suma_origenes_extra():
             headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
         )
         assert r.headers["access-control-allow-origin"] == origin
+
+
+def test_urls_del_portal_por_defecto():
+    s = Settings(_env_file=None)
+    assert s.tsone_url == "https://tsone.udea.edu.co"
+    assert s.ayudame2_url == "https://ayudame2.udea.edu.co"
+    assert s.cursum_url == "https://wsingenieria.udea.edu.co:8094/cursum/ingenieria"
+
+
+def test_url_del_portal_desde_el_entorno(monkeypatch):
+    monkeypatch.setenv("TSONE_URL", "https://tsone.example")
+    assert Settings(_env_file=None).tsone_url == "https://tsone.example"

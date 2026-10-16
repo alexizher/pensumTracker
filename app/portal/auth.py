@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
+from app.core.config import get_settings
 from app.portal.session import PortalSession
 
 if TYPE_CHECKING:
@@ -10,8 +11,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-SSO_URL = "https://ayudame2.udea.edu.co/php_mua_externos/"
-HISTORIA_URL = "https://tsone.udea.edu.co/php_historia_estudiante/"
+
+def _sso_url() -> str:
+    return get_settings().ayudame2_url + "/php_mua_externos/"
+
+
+def _historia_url() -> str:
+    return get_settings().tsone_url + "/php_historia_estudiante/"
 
 
 def reauth(session: PortalSession, host: str, password: str) -> str | None:
@@ -55,7 +61,7 @@ def reauth(session: PortalSession, host: str, password: str) -> str | None:
 
 
 def validate(session: PortalSession) -> bool:
-    resp = session.tsone_get(HISTORIA_URL + "?app=consultar")
+    resp = session.tsone_get(_historia_url() + "?app=consultar")
     invalid = (
         resp.status_code != 200
         or "php_relogin" in resp.url
@@ -69,7 +75,7 @@ def login(session: PortalSession, credentials: "PortalCredentials") -> bool:
     password = credentials.password.get_secret_value()
     log.info("login: SSO ayudame2")
     sso = session.post(
-        SSO_URL,
+        _sso_url(),
         data={"usuario": credentials.username, "clave": password},
         allow_redirects=True,
     )
@@ -79,7 +85,7 @@ def login(session: PortalSession, credentials: "PortalCredentials") -> bool:
         return False
     session.cookies.set("user_name", credentials.username, domain=".udea.edu.co", path="/")
 
-    session.get(HISTORIA_URL + "?app=consultar", allow_redirects=True)
+    session.get(_historia_url() + "?app=consultar", allow_redirects=True)
     log.info("login: reauth tsone")
     reauth(session, "tsone.udea.edu.co", password)
     if not session.udeasecure:

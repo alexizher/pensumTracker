@@ -1,0 +1,50 @@
+from pydantic import BaseModel, ConfigDict
+
+
+class _Frozen(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class StudentInfo(_Frozen):
+    student_name: str
+    program_name: str
+    program_code: str
+
+
+class ProgramOption(_Frozen):
+    """Opción del selector de programas y el formulario que hay que enviar."""
+
+    code: str
+    version: int | None
+    form_data: dict[str, str]
+
+
+class GradeRow(_Frozen):
+    """Fila de un semestre, sin interpretar la nota."""
+
+    code: str
+    name: str
+    raw_grade: str
+
+
+class OfficialPensum(_Frozen):
+    version: int | None
+    bank_minimums: dict[str, int]
+
+
+class CursumProgram(_Frozen):
+    code: str
+    version_actual: int
+    versiones: list[int]
+    total_credits: int
+
+
+class CursumSubject(_Frozen):
+    code: str
+    name: str
+    credits: int
+    level: int | None
+    obligatoria: bool
+    elective_bank: str | None
+    prerequisites: list[str]
+    corequisites: list[str]

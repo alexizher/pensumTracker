@@ -41,6 +41,12 @@ type = "forbidden"
 source_modules = ["app.portal"]
 forbidden_modules = ["fastapi", "starlette"]
 
+[[tool.importlinter.contracts]]
+name = "sources no importa fastapi ni starlette"
+type = "forbidden"
+source_modules = ["app.features.record.sources"]
+forbidden_modules = ["fastapi", "starlette"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
