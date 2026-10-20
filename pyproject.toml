@@ -20,6 +20,15 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 
+[[tool.mypy.overrides]]
+module = "app.features.*.domain.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+
 [tool.importlinter]
 root_packages = ["app"]
 include_external_packages = true
@@ -41,6 +50,19 @@ name = "sources no importa fastapi ni starlette"
 type = "forbidden"
 source_modules = ["app.features.record.sources"]
 forbidden_modules = ["fastapi", "starlette"]
+
+[[tool.importlinter.contracts]]
+name = "dominio puro"
+type = "forbidden"
+source_modules = ["app.features.record.domain"]
+forbidden_modules = [
+    "requests",
+    "bs4",
+    "fastapi",
+    "starlette",
+    "app.portal",
+    "app.features.record.sources",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
