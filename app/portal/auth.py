@@ -1,5 +1,6 @@
 import logging
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -86,8 +87,12 @@ def login(session: PortalSession, credentials: "PortalCredentials") -> bool:
     session.cookies.set("user_name", credentials.username, domain=".udea.edu.co", path="/")
 
     session.get(_historia_url() + "?app=consultar", allow_redirects=True)
+    settings = get_settings()
+    tsone_host = urlsplit(settings.tsone_url).netloc
+    ayudame2_host = urlsplit(settings.ayudame2_url).netloc
+
     log.info("login: reauth tsone")
-    reauth(session, "tsone.udea.edu.co", password)
+    reauth(session, tsone_host, password)
     if not session.udeasecure:
         log.warning("login: reauth tsone falló, udeasecure vacío")
         return False
@@ -95,7 +100,7 @@ def login(session: PortalSession, credentials: "PortalCredentials") -> bool:
 
     # El pensum oficial (mínimos por banco) vive en ayudame2.
     log.info("login: reauth ayudame2")
-    reauth(session, "ayudame2.udea.edu.co", password)
+    reauth(session, ayudame2_host, password)
 
     valid = validate(session)
     log.info("login: validate_session=%s", valid)

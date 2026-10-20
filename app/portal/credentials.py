@@ -20,6 +20,8 @@ class PortalCredentials:
 class SessionProvider(Protocol):
     def open(self, credentials: PortalCredentials) -> PortalSession: ...
 
+    def release(self, session: PortalSession) -> None: ...
+
 
 class LoginPerRequest:
     """Abre una sesión nueva por petición y no guarda nada fuera de ella."""
@@ -37,6 +39,10 @@ class LoginPerRequest:
             raise InvalidCredentials()
         session.credentials = credentials
         return session
+
+    def release(self, session: PortalSession) -> None:
+        if not session.closed:
+            session.close()
 
 
 def get_session_provider() -> SessionProvider:
