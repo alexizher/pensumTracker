@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, SecretStr
 
 from app.core.errors import PortalError, error_payload
-from app.core.streaming import ClosingStreamingResponse
+from app.core.stream import ClosingStreamingResponse
 from app.portal.credentials import PortalCredentials, SessionProvider, get_session_provider
 from models.academic import AcademicRecord
 from scraper.portal_scraper import PortalScraper

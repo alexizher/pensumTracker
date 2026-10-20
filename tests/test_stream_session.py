@@ -9,7 +9,7 @@ import requests
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from app.core.streaming import ClosingStreamingResponse
+from app.core.stream import ClosingStreamingResponse
 from app.portal.credentials import (
     LoginPerRequest,
     PortalCredentials,
