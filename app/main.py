@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import DEFAULT_ORIGINS, Settings, get_settings
 from app.core.http_errors import register_error_handlers
 from app.core.logging import configure_logging
-from routers.academic_router import router
+from app.core.stream import Stage
+from app.features.record.router import build_router
+from app.features.record.service import RecordStage
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -20,7 +22,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     register_error_handlers(app)
-    app.include_router(router)
+    # Las etapas de módulos nuevos se agregan a esta lista.
+    stages: list[Stage] = [RecordStage()]
+    app.include_router(build_router(stages))
     return app
 
 

@@ -32,7 +32,9 @@ def test_tsone_get_envia_udeasecure():
 
 
 def test_close_borra_estado():
-    s = PortalSession.from_cookies({"user_name": "u", "udeasecure": "h"})
+    s = PortalSession()
+    s.cookies.set("user_name", "u", domain=".udea.edu.co", path="/")
+    s.set_udeasecure("h")
     s.credentials = object()
     assert len(s.cookies) == 2
     pool = s._legacy_adapter.poolmanager
@@ -44,12 +46,3 @@ def test_close_borra_estado():
     assert s.udeasecure == ""
     assert len(s.cookies) == 0
     assert s.closed is True
-
-
-def test_from_cookies():
-    s = PortalSession.from_cookies({"udeasecure": "h", "user_name": "u", "phpsessid_ayudame2": "p"})
-    assert s.udeasecure == "h"
-    found = {(c.name, c.domain, c.path): c.value for c in s.cookies}
-    assert found[("udeasecure", ".udea.edu.co", "/")] == "h"
-    assert found[("user_name", ".udea.edu.co", "/")] == "u"
-    assert found[("PHPSESSID", "ayudame2.udea.edu.co", "/")] == "p"
