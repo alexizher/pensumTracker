@@ -53,3 +53,19 @@ def test_open_cierra_la_sesion_si_el_portal_no_responde(fake_portal, monkeypatch
         LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
     (session,) = sessions
     assert session.closed is True
+
+
+def test_release_cierra_la_sesion(fake_portal: FakePortal):
+    provider = LoginPerRequest()
+    session = provider.open(PortalCredentials("usuario", SecretStr("clave")))
+    provider.release(session)
+    assert session.closed is True
+    assert session.credentials is None
+
+
+def test_release_dos_veces_no_falla(fake_portal: FakePortal):
+    provider = LoginPerRequest()
+    session = provider.open(PortalCredentials("usuario", SecretStr("clave")))
+    provider.release(session)
+    provider.release(session)
+    assert session.closed is True

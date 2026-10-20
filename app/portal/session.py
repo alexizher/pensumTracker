@@ -68,14 +68,3 @@ class PortalSession(requests.Session):
         self.udeasecure = ""
         self.cookies.clear()
         self.closed = True
-
-    @classmethod
-    def from_cookies(cls, cookies: dict[str, str]) -> "PortalSession":
-        session = cls()
-        for name, value in cookies.items():
-            if name in ("user_name", "udeasecure"):
-                session.cookies.set(name, value, domain=_COOKIE_DOMAIN, path="/")
-            elif name == "phpsessid_ayudame2":
-                session.cookies.set("PHPSESSID", value, domain="ayudame2.udea.edu.co", path="/")
-        session.udeasecure = cookies.get("udeasecure", "")
-        return session
