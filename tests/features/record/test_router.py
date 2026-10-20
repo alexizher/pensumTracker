@@ -1,16 +1,17 @@
 import json
 import logging
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from typing import cast
 
 import anyio
 import pytest
 import requests
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from app.core.stream import ClosingStreamingResponse, StreamContext, run_stages
-from app.features.record.router import LoginRequest
+from app.features.record.router import LoginRequest, build_router
 from app.features.record.service import RecordStage
 from app.portal.credentials import (
     LoginPerRequest,
@@ -143,6 +144,30 @@ def test_corte_del_cliente_tras_el_primer_chunk_cierra_la_sesion(
     assert "http.response.body" in sent
     assert session.closed is True
     assert session.credentials is None
+
+
+def test_endpoint_real_cablea_on_close_con_release(
+    fake_portal: FakePortal, provider: RecordingProvider
+):
+    (ruta,) = [
+        r for r in build_router([RecordStage()]).routes if isinstance(r, APIRoute) and r.path == URL
+    ]
+    endpoint = cast(Callable[..., ClosingStreamingResponse], ruta.endpoint)
+    response = endpoint(LoginRequest(username="usuario", password=SecretStr("clave")), provider)
+    (session,) = provider.sessions
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            raise OSError("cliente desconectado")
+
+    async def run():
+        await response(_scope(), _receive_forever, send)
+
+    with pytest.raises(OSError):
+        anyio.run(run)
+    # El corte llega antes del primer evento: solo on_close puede cerrar la sesión.
+    assert session in provider.released
+    assert session.closed is True
 
 
 def test_release_tolera_doble_llamada(fake_portal: FakePortal, provider: RecordingProvider):

@@ -205,7 +205,7 @@ def explore(session: PortalSession) -> None:
 
     # Paso 3 — currículo (múltiples requests)
     print(SEP)
-    print("  [3] fetch_curriculum() — CURSUM + semestres")
+    print("  [3] currículo — CURSUM + semestres")
     show_curriculum(source, passed)
     pause()
 

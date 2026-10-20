@@ -6,7 +6,7 @@ CONSTITUCIONAL" y la v5 la renombró a 2517450 "CÁTEDRA DE FORMACIÓN CIUDADANA
 Y CONSTITUCIONAL". Las pruebas de la etapa corren contra el portal falso.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
 from pydantic import SecretStr
@@ -167,3 +167,24 @@ def test_version_automatica_sin_selector_usa_el_pensum_oficial(session: PortalSe
     # pensum_oficial.html declara (v5) y el portal de un solo programa no tiene selector.
     assert data["enrolled_version"] == 5
     assert data["pensum_version"] == 5
+
+
+def test_version_pedida_con_varios_programas_no_fija_la_matriculada(
+    fake_portal_factory: Callable[..., FakePortal],
+):
+    # 3 es una de las versiones del fake (PENSUM_VERSIONES) y la que trae el
+    # selector de programas de historia en el portal de varios programas.
+    fake_portal_factory(multi_program=True)
+    opened = LoginPerRequest().open(PortalCredentials("usuario", SecretStr("clave")))
+    try:
+        ctx = StreamContext(opened, 3)
+        events = list(RecordStage().run(ctx))
+    finally:
+        opened.close()
+    program_info = next(e for e in events if e["stage"] == "program_info")
+    data = program_info["data"]
+    assert isinstance(data, dict)
+    assert data["enrolled_version"] is None
+    record = ctx.results["record"]
+    assert isinstance(record, AcademicRecord)
+    assert record.enrolled_version is None
