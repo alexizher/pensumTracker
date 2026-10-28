@@ -29,3 +29,22 @@ def test_minimos_vacios_caen_al_catalogo():
 
 def test_version_oficial_none_cae_al_catalogo():
     assert resolve_total_credits(200, SUBJECTS, None, {"B": 4}, 5) == (200, {})
+
+
+def test_registra_la_causa_cuando_no_hay_pagina_oficial(caplog):
+    caplog.set_level("INFO")
+    resolve_total_credits(200, SUBJECTS, None, {}, 5)
+    assert "causa=sin_pagina" in caplog.text
+
+
+def test_registra_la_causa_cuando_no_hay_minimos(caplog):
+    caplog.set_level("INFO")
+    resolve_total_credits(200, SUBJECTS, 5, {}, 5)
+    assert "causa=sin_minimos" in caplog.text
+
+
+def test_registra_la_causa_cuando_la_version_no_coincide(caplog):
+    caplog.set_level("INFO")
+    resolve_total_credits(200, SUBJECTS, 4, {"B": 4}, 5)
+    assert "causa=version_distinta" in caplog.text
+    assert "page_version=4 efectiva=5" in caplog.text
