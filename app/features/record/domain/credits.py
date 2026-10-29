@@ -37,10 +37,19 @@ def resolve_total_credits(
         return total, dict(bank_minimums)
 
     log.info(
-        "resolve_total_credits: fallback cursum=%d | page_version=%s efectiva=%d bancos=%d",
+        "resolve_total_credits: fallback cursum=%d causa=%s | page_version=%s efectiva=%d "
+        "bancos=%d",
         catalog_total,
+        _fallback_cause(official_version, bank_minimums),
         official_version,
         effective_version,
         len(bank_minimums),
     )
     return catalog_total, {}
+
+
+def _fallback_cause(official_version: int | None, bank_minimums: Mapping[str, int]) -> str:
+    """Por qué no se usaron los mínimos oficiales. Solo describe el plan, no al estudiante."""
+    if not bank_minimums:
+        return "sin_pagina" if official_version is None else "sin_minimos"
+    return "version_distinta"

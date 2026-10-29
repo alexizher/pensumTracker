@@ -25,7 +25,8 @@ class EnrolledOutsidePensum(BaseModel):
 
 class ElectiveBank(BaseModel):
     name: str
-    credits_required: int
+    # None cuando el pensum oficial no dio el mínimo del banco para esta versión.
+    credits_required: int | None
     credits_approved: int
     subject_codes: list[str]
 

@@ -239,4 +239,5 @@ def test_elective_banks_banco_sin_cupo_oficial():
     with_reqs = {b.name: b.credits_required for b in elective_banks(subs, {"A": 3})}
     without_reqs = {b.name: b.credits_required for b in elective_banks(subs, {})}
     assert with_reqs == {"A": 3, "P": 0}
-    assert without_reqs == {"A": 3, "P": 5}
+    # Sin cupos oficiales el requisito es desconocido; sumar el catálogo lo inflaba (#6).
+    assert without_reqs == {"A": None, "P": None}
