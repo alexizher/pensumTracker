@@ -70,11 +70,15 @@ def elective_banks(
 
     banks: list[ElectiveBank] = []
     for bank_name, group in sorted(bank_subjects.items()):
+        required: int | None
         if bank_name in bank_requirements:
             required = bank_requirements[bank_name]
+        elif bank_requirements:
+            # Hay cupos oficiales pero no para este banco (p.ej. práctica): 0 = informativo.
+            required = 0
         else:
-            # Sin cupo oficial: no inflar con todo el catálogo; 0 = informativo.
-            required = 0 if bank_requirements else sum(s.credits for s in group)
+            # Sin cupos oficiales el mínimo es desconocido. Sumar el catálogo lo inflaba (#6).
+            required = None
         banks.append(
             ElectiveBank(
                 name=bank_name,
